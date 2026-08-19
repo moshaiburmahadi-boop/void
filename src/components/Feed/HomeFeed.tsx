@@ -4,6 +4,7 @@ import { useFollow } from '../../context/FollowContext';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { Post } from '../../types';
 import { INITIAL_POSTS } from '../../data/mockData';
+import { MobileSearchModal } from '../Search/MobileSearchModal';
 import {
   MessageCircle,
   Repeat2,
@@ -17,6 +18,8 @@ import {
   Loader2,
   Trash2,
   RotateCw,
+  Search,
+  Users,
 } from 'lucide-react';
 
 interface HomeFeedProps {
@@ -34,6 +37,7 @@ export const HomeFeed: React.FC<HomeFeedProps> = ({ posts, setPosts, onOpenCompo
   const [showImageInput, setShowImageInput] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
 
   // Fetch posts from Supabase on mount
   const fetchPosts = async () => {
@@ -120,25 +124,25 @@ export const HomeFeed: React.FC<HomeFeedProps> = ({ posts, setPosts, onOpenCompo
             if (prev.some((p) => p.id === newPost.id)) {
               return prev;
             }
-            return [
-              {
-                ...newPost,
-                profiles: authorProfile || {
-                  id: newPost.user_id,
-                  username: 'member',
-                  display_name: 'Member',
-                  avatar_url:
-                    'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80',
-                  created_at: newPost.created_at,
-                },
-                likes_count: 0,
-                user_has_liked: false,
-                replies_count: 0,
-                reposts_count: 0,
-                views_count: '0',
+            const postObj: Post = {
+              id: newPost.id,
+              user_id: newPost.user_id,
+              content: newPost.content,
+              image_url: newPost.image_url,
+              created_at: newPost.created_at || new Date().toISOString(),
+              profiles: authorProfile || {
+                username: 'member',
+                display_name: 'Void Member',
+                avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80',
+                verified: false,
               },
-              ...prev,
-            ];
+              likes_count: 0,
+              replies_count: 0,
+              reposts_count: 0,
+              views_count: '1',
+              user_has_liked: false,
+            };
+            return [postObj, ...prev];
           });
         }
       )
@@ -150,7 +154,8 @@ export const HomeFeed: React.FC<HomeFeedProps> = ({ posts, setPosts, onOpenCompo
           table: 'posts',
         },
         (payload) => {
-          setPosts((prev) => prev.filter((p) => p.id !== payload.old.id));
+          const deletedId = (payload.old as any).id;
+          setPosts((prev) => prev.filter((p) => p.id !== deletedId));
         }
       )
       .subscribe();
@@ -160,108 +165,50 @@ export const HomeFeed: React.FC<HomeFeedProps> = ({ posts, setPosts, onOpenCompo
     };
   }, []);
 
-  const handleInlineCompose = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!composeText.trim() || !profile) return;
+  // Handle post deletion
+  const handleDeletePost = async (postId: string) => {
+    if (!profile) return;
+    setPosts((prev) => prev.filter((p) => p.id !== postId));
 
-    setIsSubmitting(true);
-
-    const newPostPayload = {
-      user_id: profile.id,
-      content: composeText.trim(),
-      image_url: composeImage.trim() || null,
-      created_at: new Date().toISOString(),
-    };
-
-    try {
-      if (isSupabaseConfigured) {
-        const { data, error } = await supabase
-          .from('posts')
-          .insert(newPostPayload)
-          .select('*, profiles:user_id(*)')
-          .single();
-
-        if (!error && data) {
-          setPosts((prev) => [
-            {
-              ...data,
-              likes_count: 0,
-              user_has_liked: false,
-              replies_count: 0,
-              reposts_count: 0,
-              views_count: '1',
-            },
-            ...prev,
-          ]);
-        } else {
-          // Fallback optimistic
-          const fallbackPost: Post = {
-            id: `post-${Date.now()}`,
-            ...newPostPayload,
-            profiles: profile,
-            likes_count: 0,
-            user_has_liked: false,
-            replies_count: 0,
-            reposts_count: 0,
-            views_count: '1',
-          };
-          setPosts((prev) => [fallbackPost, ...prev]);
-        }
-      } else {
-        const fallbackPost: Post = {
-          id: `post-${Date.now()}`,
-          ...newPostPayload,
-          profiles: profile,
-          likes_count: 0,
-          user_has_liked: false,
-          replies_count: 0,
-          reposts_count: 0,
-          views_count: '1',
-        };
-        setPosts((prev) => [fallbackPost, ...prev]);
+    if (isSupabaseConfigured) {
+      try {
+        await supabase.from('posts').delete().eq('id', postId);
+      } catch (err) {
+        console.warn('Failed to delete post from Supabase:', err);
       }
-
-      setComposeText('');
-      setComposeImage('');
-      setShowImageInput(false);
-    } catch (err) {
-      console.error('Error creating post:', err);
-    } finally {
-      setIsSubmitting(false);
     }
   };
 
+  // Handle like toggle
   const handleToggleLike = async (postId: string) => {
     if (!profile) return;
 
-    const target = posts.find((p) => p.id === postId);
-    if (!target) return;
+    let isLikedNow = false;
+    let targetPost: Post | undefined;
 
-    const currentlyLiked = Boolean(target.user_has_liked);
-    const newLikedState = !currentlyLiked;
-    const currentCount = Number(target.likes_count) || 0;
-    const newCount = newLikedState ? currentCount + 1 : Math.max(0, currentCount - 1);
-
-    // Optimistic UI update
     setPosts((prev) =>
-      prev.map((p) =>
-        p.id === postId
-          ? {
-              ...p,
-              user_has_liked: newLikedState,
-              likes_count: newCount,
-            }
-          : p
-      )
+      prev.map((p) => {
+        if (p.id === postId) {
+          targetPost = p;
+          isLikedNow = !p.user_has_liked;
+          return {
+            ...p,
+            user_has_liked: isLikedNow,
+            likes_count: (p.likes_count || 0) + (isLikedNow ? 1 : -1),
+          };
+        }
+        return p;
+      })
     );
 
-    // Supabase sync
-    if (isSupabaseConfigured) {
+    if (isSupabaseConfigured && targetPost) {
       try {
-        if (newLikedState) {
+        const target = targetPost as Post;
+        if (isLikedNow) {
           await supabase.from('likes').insert({
             post_id: postId,
             user_id: profile.id,
+            created_at: new Date().toISOString(),
           });
 
           // Also trigger notification for post author
@@ -280,21 +227,23 @@ export const HomeFeed: React.FC<HomeFeedProps> = ({ posts, setPosts, onOpenCompo
             .match({ post_id: postId, user_id: profile.id });
         }
       } catch (err) {
-        console.warn('Like sync warning:', err);
+        console.warn('Like toggle sync error:', err);
       }
     }
   };
 
-  const handleToggleRepost = (postId: string) => {
+  // Handle repost toggle
+  const handleToggleRepost = async (postId: string) => {
+    if (!profile) return;
+
     setPosts((prev) =>
       prev.map((p) => {
         if (p.id === postId) {
-          const isReposted = !p.user_has_reposted;
-          const count = Number(p.reposts_count) || 0;
+          const next = !p.user_has_reposted;
           return {
             ...p,
-            user_has_reposted: isReposted,
-            reposts_count: isReposted ? count + 1 : Math.max(0, count - 1),
+            user_has_reposted: next,
+            reposts_count: (p.reposts_count || 0) + (next ? 1 : -1),
           };
         }
         return p;
@@ -302,31 +251,99 @@ export const HomeFeed: React.FC<HomeFeedProps> = ({ posts, setPosts, onOpenCompo
     );
   };
 
+  // Handle bookmark toggle
   const handleToggleBookmark = (postId: string) => {
     setPosts((prev) =>
-      prev.map((p) =>
-        p.id === postId
-          ? { ...p, user_has_bookmarked: !p.user_has_bookmarked }
-          : p
-      )
+      prev.map((p) => {
+        if (p.id === postId) {
+          return {
+            ...p,
+            user_has_bookmarked: !p.user_has_bookmarked,
+          };
+        }
+        return p;
+      })
     );
   };
 
-  const handleDeletePost = async (postId: string) => {
-    setPosts((prev) => prev.filter((p) => p.id !== postId));
+  // Handle inline compose
+  const handleInlineCompose = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!composeText.trim() || !profile || isSubmitting) return;
+
+    setIsSubmitting(true);
+    const content = composeText.trim();
+    const image = composeImage.trim() || null;
+
     if (isSupabaseConfigured) {
       try {
-        await supabase.from('posts').delete().eq('id', postId);
+        const { data, error } = await supabase
+          .from('posts')
+          .insert({
+            user_id: profile.id,
+            content,
+            image_url: image,
+            created_at: new Date().toISOString(),
+          })
+          .select(`
+            id,
+            user_id,
+            content,
+            image_url,
+            created_at,
+            profiles:user_id (*)
+          `)
+          .single();
+
+        if (!error && data) {
+          const newP: Post = {
+            id: data.id,
+            user_id: data.user_id,
+            content: data.content,
+            image_url: data.image_url,
+            created_at: data.created_at,
+            profiles: Array.isArray(data.profiles) ? data.profiles[0] : data.profiles || profile,
+            likes_count: 0,
+            replies_count: 0,
+            reposts_count: 0,
+            views_count: '1',
+            user_has_liked: false,
+          };
+          setPosts((prev) => [newP, ...prev.filter((p) => p.id !== newP.id)]);
+        }
       } catch (err) {
-        console.warn('Error deleting post:', err);
+        console.warn('Inline compose fallback:', err);
       }
+    } else {
+      const mockP: Post = {
+        id: `post_${Date.now()}`,
+        user_id: profile.id,
+        content,
+        image_url: image || undefined,
+        created_at: new Date().toISOString(),
+        profiles: profile,
+        likes_count: 0,
+        replies_count: 0,
+        reposts_count: 0,
+        views_count: '1',
+        user_has_liked: false,
+      };
+      setPosts((prev) => [mockP, ...prev]);
     }
+
+    setComposeText('');
+    setComposeImage('');
+    setShowImageInput(false);
+    setIsSubmitting(false);
   };
 
-  const formatRelativeTime = (isoString: string) => {
+  const formatRelativeTime = (timestamp?: string) => {
+    if (!timestamp) return 'now';
     try {
-      const diff = Date.now() - new Date(isoString).getTime();
-      const mins = Math.floor(diff / 60000);
+      const now = new Date();
+      const postDate = new Date(timestamp);
+      const diffMs = now.getTime() - postDate.getTime();
+      const mins = Math.floor(diffMs / 60000);
       if (mins < 1) return 'now';
       if (mins < 60) return `${mins}m`;
       const hours = Math.floor(mins / 60);
@@ -338,10 +355,12 @@ export const HomeFeed: React.FC<HomeFeedProps> = ({ posts, setPosts, onOpenCompo
     }
   };
 
-  // Filter based on tab: 'for_you' shows all posts from all users, 'following' shows followed users + self
+  // Filter based on tab:
+  // 'for_you' shows all posts from all users
+  // 'following' shows ONLY posts authored by followed users (ordered by created_at desc)
   const displayedPosts =
     feedTab === 'following'
-      ? posts.filter((p) => p.user_id === profile?.id || isFollowing(p.user_id))
+      ? posts.filter((p) => isFollowing(p.user_id))
       : posts;
 
   return (
@@ -349,13 +368,24 @@ export const HomeFeed: React.FC<HomeFeedProps> = ({ posts, setPosts, onOpenCompo
       {/* Mobile Top Header */}
       <header className="docked full-width top-0 sticky z-30 border-b border-[#201f1f] flex justify-between items-center w-full px-4 max-w-[600px] mx-auto bg-black/85 backdrop-blur-md h-14 md:hidden">
         <span className="text-xl font-black tracking-tight text-[#e5e2e1]">Void</span>
-        <button
-          onClick={fetchPosts}
-          className="text-[#89919d] hover:text-white p-2 rounded-full hover:bg-white/10 transition-colors"
-          title="Refresh Feed"
-        >
-          <RotateCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setIsMobileSearchOpen(true)}
+            className="text-[#89919d] hover:text-white p-2 rounded-full hover:bg-white/10 transition-colors md:hidden"
+            title="Search Void"
+            aria-label="Search Void"
+          >
+            <Search className="w-4 h-4" />
+          </button>
+          <button
+            onClick={fetchPosts}
+            className="text-[#89919d] hover:text-white p-2 rounded-full hover:bg-white/10 transition-colors"
+            title="Refresh Feed"
+            aria-label="Refresh Feed"
+          >
+            <RotateCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+          </button>
+        </div>
       </header>
 
       {/* Sticky Header Tabs: For You / Following */}
@@ -449,7 +479,7 @@ export const HomeFeed: React.FC<HomeFeedProps> = ({ posts, setPosts, onOpenCompo
                 type="button"
                 onClick={() => setComposeText((prev) => prev + ' #Glassmorphism')}
                 className="p-2 rounded-full hover:bg-[#1d9bf0]/10 transition-colors"
-                title="Trend Tag"
+                title="Hashtag"
               >
                 <Sparkles className="w-4 h-4" />
               </button>
@@ -473,16 +503,28 @@ export const HomeFeed: React.FC<HomeFeedProps> = ({ posts, setPosts, onOpenCompo
       {/* Feed Posts List */}
       <div className="divide-y divide-[#201f1f]">
         {displayedPosts.length === 0 ? (
-          <div className="p-12 text-center text-[#89919d]">
-            <p className="text-base font-semibold text-[#e5e2e1] mb-1">No posts yet</p>
-            <p className="text-xs mb-4">Be the first to share an update on Void!</p>
-            <button
-              onClick={onOpenCompose}
-              className="px-5 py-2 bg-[#1d9bf0] text-white text-xs font-bold rounded-full hover:bg-[#1a8cd8]"
-            >
-              Create Post
-            </button>
-          </div>
+          feedTab === 'following' ? (
+            <div className="py-16 px-6 text-center text-[#89919d] flex flex-col items-center justify-center">
+              <div className="w-12 h-12 rounded-full bg-[#16181c] border border-[#2f3336] flex items-center justify-center mb-3 text-[#1d9bf0]">
+                <Users className="w-6 h-6" />
+              </div>
+              <p className="text-base font-bold text-[#e5e2e1] mb-1">No posts yet</p>
+              <p className="text-xs text-[#71767b] max-w-xs">
+                No posts yet. Follow people to see their posts here!
+              </p>
+            </div>
+          ) : (
+            <div className="p-12 text-center text-[#89919d]">
+              <p className="text-base font-semibold text-[#e5e2e1] mb-1">No posts yet</p>
+              <p className="text-xs mb-4">Be the first to share an update on Void!</p>
+              <button
+                onClick={onOpenCompose}
+                className="px-5 py-2 bg-[#1d9bf0] text-white text-xs font-bold rounded-full hover:bg-[#1a8cd8]"
+              >
+                Create Post
+              </button>
+            </div>
+          )
         ) : (
           displayedPosts.map((post) => {
             const author = post.profiles || {
@@ -643,6 +685,12 @@ export const HomeFeed: React.FC<HomeFeedProps> = ({ posts, setPosts, onOpenCompo
           })
         )}
       </div>
+
+      {/* Mobile Search Modal */}
+      <MobileSearchModal
+        isOpen={isMobileSearchOpen}
+        onClose={() => setIsMobileSearchOpen(false)}
+      />
     </main>
   );
 };
