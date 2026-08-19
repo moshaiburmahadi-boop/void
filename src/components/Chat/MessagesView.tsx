@@ -6,30 +6,38 @@ import {
   Search,
   Edit3,
   Send,
-  Image as ImageIcon,
-  Smile,
   ArrowLeft,
   CheckCircle2,
   Mail,
-  UserPlus,
+  Users,
 } from 'lucide-react';
 
 interface MessagesViewProps {
+  initialPartner?: Profile | null;
   onUnreadChange?: (count: number) => void;
+  onViewProfile?: (user: Profile) => void;
 }
 
-export const MessagesView: React.FC<MessagesViewProps> = ({ onUnreadChange }) => {
+export const MessagesView: React.FC<MessagesViewProps> = ({
+  initialPartner,
+  onUnreadChange,
+  onViewProfile,
+}) => {
   const { profile } = useAuth();
   const [conversations, setConversations] = useState<Profile[]>([]);
-  const [activePartner, setActivePartner] = useState<Profile | null>(null);
+  const [activePartner, setActivePartner] = useState<Profile | null>(initialPartner || null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
-  const [showMobileChat, setShowMobileChat] = useState(false);
+  const [showMobileChat, setShowMobileChat] = useState(Boolean(initialPartner));
   const [isSearchingUser, setIsSearchingUser] = useState(false);
   const [allUsers, setAllUsers] = useState<Profile[]>([]);
+  const [isPartnerTyping, setIsPartnerTyping] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const typingDebounceRef = useRef<NodeJS.Timeout | null>(null);
+  const partnerTypingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const channelRef = useRef<any>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -37,7 +45,21 @@ export const MessagesView: React.FC<MessagesViewProps> = ({ onUnreadChange }) =>
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages]);
+  }, [messages, isPartnerTyping]);
+
+  // If initialPartner changes from props, set active conversation
+  useEffect(() => {
+    if (initialPartner) {
+      setActivePartner(initialPartner);
+      setShowMobileChat(true);
+      setConversations((prev) => {
+        if (!prev.some((p) => p.id === initialPartner.id)) {
+          return [initialPartner, ...prev];
+        }
+        return prev;
+      });
+    }
+  }, [initialPartner]);
 
   // Load existing profiles / conversations
   useEffect(() => {
@@ -46,17 +68,25 @@ export const MessagesView: React.FC<MessagesViewProps> = ({ onUnreadChange }) =>
     const fetchUsersAndConversations = async () => {
       if (isSupabaseConfigured) {
         try {
-          // Fetch profiles excluding current user
           const { data: profilesData } = await supabase
             .from('profiles')
             .select('*')
             .neq('id', profile.id)
-            .limit(20);
+            .limit(30);
 
           if (profilesData && profilesData.length > 0) {
             setAllUsers(profilesData as Profile[]);
-            setConversations(profilesData as Profile[]);
-            if (!activePartner && profilesData.length > 0) {
+            setConversations((prev) => {
+              const combined = [...prev];
+              profilesData.forEach((p) => {
+                if (!combined.some((c) => c.id === p.id)) {
+                  combined.push(p as Profile);
+                }
+              });
+              return combined;
+            });
+
+            if (!activePartner && !initialPartner && profilesData.length > 0) {
               setActivePartner(profilesData[0] as Profile);
             }
           }
@@ -69,12 +99,15 @@ export const MessagesView: React.FC<MessagesViewProps> = ({ onUnreadChange }) =>
     fetchUsersAndConversations();
   }, [profile?.id]);
 
-  // Load message history with activePartner
+  // Load message history & setup real-time broadcast and message listeners
   useEffect(() => {
     if (!profile || !activePartner) {
       setMessages([]);
+      setIsPartnerTyping(false);
       return;
     }
+
+    setIsPartnerTyping(false);
 
     if (isSupabaseConfigured) {
       const fetchHistory = async () => {
@@ -110,9 +143,13 @@ export const MessagesView: React.FC<MessagesViewProps> = ({ onUnreadChange }) =>
 
       fetchHistory();
 
-      // Subscribe to real-time incoming messages
-      const channel = supabase
-        .channel(`messages_${profile.id}_${activePartner.id}`)
+      // Deterministic sorted channel ID for 1-to-1 conversation
+      const conversationId = [profile.id, activePartner.id].sort().join('_');
+      const channel = supabase.channel(`chat_${conversationId}`);
+      channelRef.current = channel;
+
+      channel
+        // Listen for new messages inserted in DB
         .on(
           'postgres_changes',
           {
@@ -127,13 +164,18 @@ export const MessagesView: React.FC<MessagesViewProps> = ({ onUnreadChange }) =>
               (newMsg.sender_id === profile.id && newMsg.receiver_id === activePartner.id);
 
             if (isRelevant) {
+              // Hide typing indicator when new message arrives
+              if (newMsg.sender_id === activePartner.id) {
+                setIsPartnerTyping(false);
+              }
+
               setMessages((prev) => {
                 // 1. Deduplicate by exact database ID
                 if (prev.some((m) => m.id === newMsg.id)) {
                   return prev;
                 }
 
-                // 2. Deduplicate / replace optimistic message with real message
+                // 2. Replace optimistic message
                 const tempIndex = prev.findIndex(
                   (m) =>
                     m.id.startsWith('temp_') &&
@@ -152,7 +194,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({ onUnreadChange }) =>
                   return updated;
                 }
 
-                // 3. New message from partner or fresh insert
+                // 3. New incoming message
                 return [
                   ...prev,
                   {
@@ -165,13 +207,78 @@ export const MessagesView: React.FC<MessagesViewProps> = ({ onUnreadChange }) =>
             }
           }
         )
+        // Listen for realtime typing broadcast from partner
+        .on('broadcast', { event: 'typing' }, (eventPayload) => {
+          const { userId, isTyping } = eventPayload?.payload || {};
+          if (userId === activePartner.id) {
+            setIsPartnerTyping(Boolean(isTyping));
+
+            // Auto reset typing after 2.5s if no further typing broadcast received
+            if (partnerTypingTimeoutRef.current) {
+              clearTimeout(partnerTypingTimeoutRef.current);
+            }
+            if (isTyping) {
+              partnerTypingTimeoutRef.current = setTimeout(() => {
+                setIsPartnerTyping(false);
+              }, 2500);
+            }
+          }
+        })
         .subscribe();
 
       return () => {
-        supabase.removeChannel(channel);
+        if (channelRef.current) {
+          supabase.removeChannel(channelRef.current);
+          channelRef.current = null;
+        }
+        if (partnerTypingTimeoutRef.current) {
+          clearTimeout(partnerTypingTimeoutRef.current);
+        }
       };
     }
   }, [activePartner?.id, profile?.id]);
+
+  // Emit typing broadcast event with 2s debounce
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setInputText(val);
+
+    if (!profile || !activePartner || !channelRef.current) return;
+
+    if (val.trim().length > 0) {
+      // Broadcast typing = true
+      channelRef.current.send({
+        type: 'broadcast',
+        event: 'typing',
+        payload: { userId: profile.id, isTyping: true },
+      });
+
+      // Clear existing debounce and set 2-second timeout to broadcast typing = false
+      if (typingDebounceRef.current) {
+        clearTimeout(typingDebounceRef.current);
+      }
+
+      typingDebounceRef.current = setTimeout(() => {
+        if (channelRef.current) {
+          channelRef.current.send({
+            type: 'broadcast',
+            event: 'typing',
+            payload: { userId: profile.id, isTyping: false },
+          });
+        }
+      }, 2000);
+    } else {
+      // If user clears the input, immediately broadcast typing = false
+      if (typingDebounceRef.current) {
+        clearTimeout(typingDebounceRef.current);
+      }
+      channelRef.current.send({
+        type: 'broadcast',
+        event: 'typing',
+        payload: { userId: profile.id, isTyping: false },
+      });
+    }
+  };
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -179,6 +286,18 @@ export const MessagesView: React.FC<MessagesViewProps> = ({ onUnreadChange }) =>
 
     const content = inputText.trim();
     setInputText('');
+
+    // Immediately stop typing broadcast
+    if (typingDebounceRef.current) {
+      clearTimeout(typingDebounceRef.current);
+    }
+    if (channelRef.current) {
+      channelRef.current.send({
+        type: 'broadcast',
+        event: 'typing',
+        payload: { userId: profile.id, isTyping: false },
+      });
+    }
 
     const tempId = `temp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const optimisticMsg: Message = {
@@ -219,7 +338,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({ onUnreadChange }) =>
           );
         }
       } catch (err) {
-        console.warn('Error sending message:', err);
+        console.warn('Failed to send message to Supabase:', err);
       }
     }
   };
@@ -234,7 +353,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({ onUnreadChange }) =>
     <main className="w-full max-w-[990px] min-h-screen border-r border-[#201f1f] flex pb-20 lg:pb-0 select-none">
       {/* Conversations Column */}
       <div
-        className={`w-full md:w-[380px] border-r border-[#201f1f] flex flex-col h-screen sticky top-0 bg-black ${
+        className={`w-full md:w-[380px] border-r border-[#201f1f] flex flex-col h-screen sticky top-0 bg-black shrink-0 ${
           showMobileChat ? 'hidden md:flex' : 'flex'
         }`}
       >
@@ -259,7 +378,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({ onUnreadChange }) =>
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search Direct Messages"
-              className="w-full bg-[#18181b] border border-transparent rounded-full py-2 pl-10 pr-4 text-xs text-[#e5e2e1] placeholder-[#89919d] focus:border-[#1d9bf0] focus:ring-1 focus:ring-[#1d9bf0] outline-none transition-all"
+              className="w-full bg-[#18181b] border border-transparent rounded-full py-2 pl-10 pr-4 text-xs text-[#e5e2e1] placeholder-[#89919d] focus:border-[#1d9bf0] focus:ring-1 focus:ring-[#1d9bf0] outline-none"
             />
           </div>
         </div>
@@ -267,15 +386,12 @@ export const MessagesView: React.FC<MessagesViewProps> = ({ onUnreadChange }) =>
         {/* Conversation List */}
         <div className="flex-1 overflow-y-auto divide-y divide-[#18181b]">
           {filteredConversations.length === 0 ? (
-            <div className="p-8 text-center text-[#89919d] flex flex-col items-center">
-              <Mail className="w-10 h-10 mb-3 text-[#27272a]" />
-              <p className="text-sm font-bold text-[#e5e2e1] mb-1">No messages yet</p>
-              <p className="text-xs max-w-[200px] mb-4">
-                Send a direct message to begin a private conversation.
-              </p>
+            <div className="p-8 text-center text-[#89919d]">
+              <p className="text-sm font-semibold text-[#e5e2e1] mb-1">No conversations</p>
+              <p className="text-xs mb-4">Start messaging any registered user on Void!</p>
               <button
                 onClick={() => setIsSearchingUser(true)}
-                className="px-4 py-2 bg-[#e5e2e1] text-black font-bold text-xs rounded-full hover:bg-white transition-all cursor-pointer"
+                className="px-4 py-1.5 bg-[#1d9bf0] text-white text-xs font-bold rounded-full hover:bg-[#1a8cd8]"
               >
                 Start Conversation
               </button>
@@ -305,12 +421,10 @@ export const MessagesView: React.FC<MessagesViewProps> = ({ onUnreadChange }) =>
                         {user.display_name || user.username}
                       </span>
                       {user.verified && (
-                        <CheckCircle2 className="w-3.5 h-3.5 text-[#1d9bf0] fill-[#1d9bf0]" />
+                        <CheckCircle2 className="w-3.5 h-3.5 text-[#1d9bf0] fill-[#1d9bf0] shrink-0" />
                       )}
                     </div>
-                    <span className="text-xs text-[#89919d] block truncate">
-                      @{user.username}
-                    </span>
+                    <span className="text-xs text-[#89919d] truncate">@{user.username}</span>
                   </div>
                 </div>
               );
@@ -319,50 +433,72 @@ export const MessagesView: React.FC<MessagesViewProps> = ({ onUnreadChange }) =>
         </div>
       </div>
 
-      {/* Chat Thread */}
+      {/* Active Chat Conversation Pane */}
       <div
         className={`flex-1 flex flex-col h-screen sticky top-0 bg-black ${
-          showMobileChat ? 'flex' : 'hidden md:flex'
+          !showMobileChat ? 'hidden md:flex' : 'flex'
         }`}
       >
         {activePartner ? (
           <>
-            {/* Thread Header */}
-            <div className="p-3.5 border-b border-[#201f1f] flex items-center justify-between bg-black/85 backdrop-blur-md sticky top-0 z-10">
+            {/* Chat Top Header */}
+            <div className="p-3.5 border-b border-[#201f1f] flex items-center justify-between bg-black/90 backdrop-blur-md">
               <div className="flex items-center gap-3">
                 <button
                   onClick={() => setShowMobileChat(false)}
-                  className="md:hidden p-1.5 text-[#89919d] hover:text-white rounded-full"
+                  className="md:hidden p-1.5 text-[#89919d] hover:text-white rounded-full hover:bg-[#18181b]"
                 >
                   <ArrowLeft className="w-5 h-5" />
                 </button>
-                <img
-                  src={activePartner.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80'}
-                  alt={activePartner.username}
-                  className="w-9 h-9 rounded-full object-cover border border-[#27272a]"
-                />
-                <div>
-                  <div className="flex items-center gap-1">
-                    <span className="font-bold text-sm text-[#e5e2e1]">
-                      {activePartner.display_name || activePartner.username}
+                <div
+                  onClick={() => onViewProfile && onViewProfile(activePartner)}
+                  className="flex items-center gap-3 cursor-pointer group"
+                >
+                  <img
+                    src={
+                      activePartner.avatar_url ||
+                      'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80'
+                    }
+                    alt={activePartner.username}
+                    className="w-9 h-9 rounded-full object-cover border border-[#27272a]"
+                  />
+                  <div>
+                    <div className="flex items-center gap-1">
+                      <span className="font-bold text-sm text-[#e5e2e1] group-hover:underline">
+                        {activePartner.display_name || activePartner.username}
+                      </span>
+                      {activePartner.verified && (
+                        <CheckCircle2 className="w-3.5 h-3.5 text-[#1d9bf0] fill-[#1d9bf0]" />
+                      )}
+                    </div>
+                    <span className="text-xs text-[#89919d]">
+                      {isPartnerTyping ? (
+                        <span className="text-[#1d9bf0] font-medium animate-pulse">typing...</span>
+                      ) : (
+                        `@${activePartner.username}`
+                      )}
                     </span>
-                    {activePartner.verified && (
-                      <CheckCircle2 className="w-3.5 h-3.5 text-[#1d9bf0] fill-[#1d9bf0]" />
-                    )}
                   </div>
-                  <span className="text-xs text-[#89919d]">@{activePartner.username}</span>
                 </div>
               </div>
             </div>
 
-            {/* Messages Stream */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            {/* Messages Scroll Area */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-3 flex flex-col">
               {messages.length === 0 ? (
-                <div className="p-8 text-center text-[#89919d] flex flex-col items-center justify-center h-full">
-                  <p className="text-sm font-semibold text-[#e5e2e1] mb-1">
-                    Direct conversation with @{activePartner.username}
+                <div className="flex-1 flex flex-col items-center justify-center text-center p-8 text-[#89919d]">
+                  <img
+                    src={activePartner.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80'}
+                    alt={activePartner.username}
+                    className="w-16 h-16 rounded-full object-cover border border-[#27272a] mb-3"
+                  />
+                  <h3 className="font-bold text-base text-[#e5e2e1]">
+                    {activePartner.display_name || activePartner.username}
+                  </h3>
+                  <p className="text-xs mb-3">@{activePartner.username}</p>
+                  <p className="text-xs max-w-xs">
+                    Say hello to start the conversation! Realtime messaging with instant delivery.
                   </p>
-                  <p className="text-xs">Say hello to break the ice.</p>
                 </div>
               ) : (
                 messages.map((msg) => {
@@ -373,10 +509,10 @@ export const MessagesView: React.FC<MessagesViewProps> = ({ onUnreadChange }) =>
                       className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}
                     >
                       <div
-                        className={`max-w-[75%] rounded-2xl px-4 py-2.5 text-sm ${
+                        className={`max-w-[80%] sm:max-w-[70%] px-4 py-2.5 rounded-2xl text-sm leading-relaxed break-words whitespace-pre-wrap ${
                           isMe
                             ? 'bg-[#1d9bf0] text-white rounded-br-none'
-                            : 'bg-[#202327] text-[#e5e2e1] rounded-bl-none'
+                            : 'bg-[#201f1f] text-[#e5e2e1] rounded-bl-none'
                         }`}
                       >
                         {msg.content}
@@ -385,6 +521,26 @@ export const MessagesView: React.FC<MessagesViewProps> = ({ onUnreadChange }) =>
                   );
                 })
               )}
+
+              {/* Real-time 3-Dot Typing Indicator Bubble */}
+              {isPartnerTyping && (
+                <div className="flex items-end gap-2 my-2 animate-fade-in">
+                  <img
+                    src={
+                      activePartner.avatar_url ||
+                      'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80'
+                    }
+                    alt={activePartner.username}
+                    className="w-7 h-7 rounded-full object-cover border border-[#27272a] shrink-0 mb-1"
+                  />
+                  <div className="bg-neutral-800 text-neutral-300 rounded-full px-4 py-2 flex items-center gap-1.5 shadow-sm">
+                    <span className="w-2 h-2 bg-neutral-400 rounded-full animate-bounce [animation-delay:-0.3s]" />
+                    <span className="w-2 h-2 bg-neutral-400 rounded-full animate-bounce [animation-delay:-0.15s]" />
+                    <span className="w-2 h-2 bg-neutral-400 rounded-full animate-bounce" />
+                  </div>
+                </div>
+              )}
+
               <div ref={messagesEndRef} />
             </div>
 
@@ -396,8 +552,8 @@ export const MessagesView: React.FC<MessagesViewProps> = ({ onUnreadChange }) =>
               <input
                 type="text"
                 value={inputText}
-                onChange={(e) => setInputText(e.target.value)}
-                placeholder="Start a new message"
+                onChange={handleInputChange}
+                placeholder="Start a new message..."
                 className="flex-1 bg-[#18181b] border border-transparent rounded-full px-4 py-2.5 text-sm text-[#e5e2e1] placeholder-[#89919d] focus:border-[#1d9bf0] focus:ring-1 focus:ring-[#1d9bf0] outline-none"
               />
               <button
@@ -430,7 +586,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({ onUnreadChange }) =>
               <h3 className="font-bold text-sm text-[#e5e2e1]">New message</h3>
               <button
                 onClick={() => setIsSearchingUser(false)}
-                className="text-xs text-[#1d9bf0] font-bold"
+                className="text-xs text-[#1d9bf0] font-bold cursor-pointer"
               >
                 Close
               </button>

@@ -7,9 +7,10 @@ import { Search, Loader2, X, CheckCircle2, UserPlus, UserCheck, Sparkles, Users 
 
 interface RightSidebarProps {
   onSearch?: (query: string) => void;
+  onViewProfile?: (user: Profile) => void;
 }
 
-export const RightSidebar: React.FC<RightSidebarProps> = ({ onSearch }) => {
+export const RightSidebar: React.FC<RightSidebarProps> = ({ onSearch, onViewProfile }) => {
   const { profile } = useAuth();
   const { isFollowing, toggleFollow } = useFollow();
   const [searchQuery, setSearchQuery] = useState('');
@@ -177,7 +178,15 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ onSearch }) => {
                     key={user.id}
                     className="p-3.5 hover:bg-[#16181c] transition-colors flex items-center justify-between gap-3"
                   >
-                    <div className="flex items-center gap-3 min-w-0">
+                    <div
+                      onClick={() => {
+                        if (onViewProfile) {
+                          onViewProfile(user);
+                          setShowDropdown(false);
+                        }
+                      }}
+                      className="flex items-center gap-3 min-w-0 flex-1 cursor-pointer group/user"
+                    >
                       <img
                         src={
                           user.avatar_url ||
@@ -188,7 +197,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ onSearch }) => {
                       />
                       <div className="min-w-0">
                         <div className="flex items-center gap-1">
-                          <p className="text-sm font-bold text-[#e7e9ea] truncate">
+                          <p className="text-sm font-bold text-[#e7e9ea] truncate group-hover/user:underline">
                             {user.display_name || user.username}
                           </p>
                           {user.verified && (
@@ -256,7 +265,10 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ onSearch }) => {
                   key={user.id}
                   className="px-4 py-3 hover:bg-[#16181c] transition-colors flex items-center justify-between gap-3 group"
                 >
-                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                  <div
+                    onClick={() => onViewProfile && onViewProfile(user)}
+                    className="flex items-center gap-3 min-w-0 flex-1 cursor-pointer"
+                  >
                     <img
                       src={
                         user.avatar_url ||

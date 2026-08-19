@@ -9,9 +9,14 @@ import { motion, AnimatePresence } from 'motion/react';
 interface MobileSearchModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onViewProfile?: (user: Profile) => void;
 }
 
-export const MobileSearchModal: React.FC<MobileSearchModalProps> = ({ isOpen, onClose }) => {
+export const MobileSearchModal: React.FC<MobileSearchModalProps> = ({
+  isOpen,
+  onClose,
+  onViewProfile,
+}) => {
   const { profile } = useAuth();
   const { isFollowing, toggleFollow } = useFollow();
   const [query, setQuery] = useState('');
@@ -98,6 +103,13 @@ export const MobileSearchModal: React.FC<MobileSearchModalProps> = ({ isOpen, on
 
   const displayList = query.trim() ? results : recentMembers;
 
+  const handleUserClick = (user: Profile) => {
+    if (onViewProfile) {
+      onViewProfile(user);
+      onClose();
+    }
+  };
+
   return (
     <AnimatePresence>
       <div className="fixed inset-0 z-50 bg-black flex flex-col md:hidden select-none">
@@ -167,7 +179,10 @@ export const MobileSearchModal: React.FC<MobileSearchModalProps> = ({ isOpen, on
                     key={user.id}
                     className="p-4 hover:bg-[#16181c] transition-colors flex items-center justify-between gap-3 active:bg-[#1f2125]"
                   >
-                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                    <div
+                      onClick={() => handleUserClick(user)}
+                      className="flex items-center gap-3 min-w-0 flex-1 cursor-pointer"
+                    >
                       <img
                         src={
                           user.avatar_url ||
@@ -178,7 +193,7 @@ export const MobileSearchModal: React.FC<MobileSearchModalProps> = ({ isOpen, on
                       />
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-1">
-                          <p className="text-sm font-bold text-[#e7e9ea] truncate">
+                          <p className="text-sm font-bold text-[#e7e9ea] truncate hover:underline">
                             {user.display_name || user.username}
                           </p>
                           {user.verified && (

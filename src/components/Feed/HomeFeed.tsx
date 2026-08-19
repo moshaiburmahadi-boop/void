@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useFollow } from '../../context/FollowContext';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
-import { Post } from '../../types';
+import { Post, Profile } from '../../types';
 import { INITIAL_POSTS } from '../../data/mockData';
 import { MobileSearchModal } from '../Search/MobileSearchModal';
 import {
@@ -26,9 +26,15 @@ interface HomeFeedProps {
   posts: Post[];
   setPosts: React.Dispatch<React.SetStateAction<Post[]>>;
   onOpenCompose: () => void;
+  onViewProfile?: (user: Profile) => void;
 }
 
-export const HomeFeed: React.FC<HomeFeedProps> = ({ posts, setPosts, onOpenCompose }) => {
+export const HomeFeed: React.FC<HomeFeedProps> = ({
+  posts,
+  setPosts,
+  onOpenCompose,
+  onViewProfile,
+}) => {
   const { profile } = useAuth();
   const { isFollowing } = useFollow();
   const [feedTab, setFeedTab] = useState<'for_you' | 'following'>('for_you');
@@ -544,14 +550,28 @@ export const HomeFeed: React.FC<HomeFeedProps> = ({ posts, setPosts, onOpenCompo
                 <img
                   src={author.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80'}
                   alt={author.display_name || author.username}
-                  className="w-10 h-10 rounded-full object-cover shrink-0 border border-[#27272a]"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (onViewProfile && post.profiles) {
+                      onViewProfile(post.profiles);
+                    }
+                  }}
+                  className="w-10 h-10 rounded-full object-cover shrink-0 border border-[#27272a] hover:opacity-80 transition-opacity cursor-pointer"
                 />
 
                 <div className="flex-1 min-w-0">
                   {/* Author Header */}
                   <div className="flex items-center justify-between gap-1 mb-1">
-                    <div className="flex items-center gap-1.5 min-w-0 truncate">
-                      <span className="font-bold text-sm text-[#e5e2e1] truncate group-hover:underline">
+                    <div
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (onViewProfile && post.profiles) {
+                          onViewProfile(post.profiles);
+                        }
+                      }}
+                      className="flex items-center gap-1.5 min-w-0 truncate cursor-pointer group/author"
+                    >
+                      <span className="font-bold text-sm text-[#e5e2e1] truncate group-hover/author:underline">
                         {author.display_name || author.username}
                       </span>
                       {author.verified && (
@@ -690,6 +710,7 @@ export const HomeFeed: React.FC<HomeFeedProps> = ({ posts, setPosts, onOpenCompo
       <MobileSearchModal
         isOpen={isMobileSearchOpen}
         onClose={() => setIsMobileSearchOpen(false)}
+        onViewProfile={onViewProfile}
       />
     </main>
   );

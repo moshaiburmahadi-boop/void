@@ -7,9 +7,13 @@ import { Search, User, MessageSquare, CheckCircle2, UserPlus, UserCheck } from '
 
 interface ExploreViewProps {
   initialSearchQuery?: string;
+  onViewProfile?: (user: Profile) => void;
 }
 
-export const ExploreView: React.FC<ExploreViewProps> = ({ initialSearchQuery = '' }) => {
+export const ExploreView: React.FC<ExploreViewProps> = ({
+  initialSearchQuery = '',
+  onViewProfile,
+}) => {
   const { profile } = useAuth();
   const { isFollowing, toggleFollow } = useFollow();
   const [search, setSearch] = useState(initialSearchQuery);
@@ -100,25 +104,28 @@ export const ExploreView: React.FC<ExploreViewProps> = ({ initialSearchQuery = '
                     key={u.id}
                     className="flex items-center justify-between p-3 bg-[#121212] rounded-2xl border border-[#201f1f]"
                   >
-                    <div className="flex items-center gap-3">
+                    <div
+                      onClick={() => onViewProfile && onViewProfile(u)}
+                      className="flex items-center gap-3 cursor-pointer group/user flex-1 min-w-0"
+                    >
                       <img
                         src={
                           u.avatar_url ||
                           'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80'
                         }
                         alt={u.username}
-                        className="w-10 h-10 rounded-full object-cover border border-[#27272a]"
+                        className="w-10 h-10 rounded-full object-cover border border-[#27272a] shrink-0"
                       />
-                      <div>
+                      <div className="min-w-0">
                         <div className="flex items-center gap-1">
-                          <p className="text-sm font-bold text-[#e5e2e1]">
+                          <p className="text-sm font-bold text-[#e5e2e1] truncate group-hover/user:underline">
                             {u.display_name || u.username}
                           </p>
                           {u.verified && (
                             <CheckCircle2 className="w-3.5 h-3.5 text-[#1d9bf0] fill-[#1d9bf0]" />
                           )}
                         </div>
-                        <p className="text-xs text-[#89919d]">@{u.username}</p>
+                        <p className="text-xs text-[#89919d] truncate">@{u.username}</p>
                       </div>
                     </div>
 

@@ -2,10 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useFollow } from '../../context/FollowContext';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
-import { Notification } from '../../types';
+import { Notification, Profile } from '../../types';
 import { Heart, Repeat2, User, Settings, Bell, CheckCircle2, UserCheck, UserPlus } from 'lucide-react';
 
-export const NotificationsView: React.FC = () => {
+interface NotificationsViewProps {
+  onViewProfile?: (user: Profile) => void;
+}
+
+export const NotificationsView: React.FC<NotificationsViewProps> = ({ onViewProfile }) => {
   const { profile } = useAuth();
   const { isFollowing, toggleFollow } = useFollow();
   const [tab, setTab] = useState<'all' | 'mentions'>('all');
@@ -175,7 +179,13 @@ export const NotificationsView: React.FC = () => {
                     <img
                       src={actor.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80'}
                       alt={actor.username}
-                      className="w-10 h-10 rounded-full object-cover border border-[#27272a]"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (onViewProfile && notif.actor_profile) {
+                          onViewProfile(notif.actor_profile);
+                        }
+                      }}
+                      className="w-10 h-10 rounded-full object-cover border border-[#27272a] hover:opacity-80 transition-opacity cursor-pointer"
                     />
                   )}
                 </div>
@@ -187,7 +197,13 @@ export const NotificationsView: React.FC = () => {
                       <img
                         src={actor.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80'}
                         alt={actor.username}
-                        className="w-8 h-8 rounded-full object-cover border border-[#27272a]"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (onViewProfile && notif.actor_profile) {
+                            onViewProfile(notif.actor_profile);
+                          }
+                        }}
+                        className="w-8 h-8 rounded-full object-cover border border-[#27272a] hover:opacity-80 transition-opacity cursor-pointer"
                       />
 
                       {notif.type === 'follow' && (

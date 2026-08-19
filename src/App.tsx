@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { FollowProvider } from './context/FollowContext';
 import { supabase, isSupabaseConfigured } from './lib/supabase';
-import { ActiveTab, Post } from './types';
+import { ActiveTab, Post, Profile } from './types';
 import { INITIAL_POSTS } from './data/mockData';
 import { DesktopSidebar } from './components/Navigation/DesktopSidebar';
 import { MobileBottomNav } from './components/Navigation/MobileBottomNav';
@@ -12,6 +12,7 @@ import { ExploreView } from './components/Explore/ExploreView';
 import { NotificationsView } from './components/Notifications/NotificationsView';
 import { MessagesView } from './components/Chat/MessagesView';
 import { ProfileView } from './components/Profile/ProfileView';
+import { PublicProfileModal } from './components/Profile/PublicProfileModal';
 import { PostComposeModal } from './components/Feed/PostComposeModal';
 import { SQLModal } from './components/SQLModal';
 import { SettingsModal } from './components/SettingsModal';
@@ -26,6 +27,10 @@ const MainApp: React.FC = () => {
   const [isSQLModalOpen, setIsSQLModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Public profile modal state
+  const [selectedPublicProfile, setSelectedPublicProfile] = useState<Profile | null>(null);
+  const [directMessageUser, setDirectMessageUser] = useState<Profile | null>(null);
 
   // Unread badge indicators (red dot & counts)
   const [hasUnreadMessages, setHasUnreadMessages] = useState(false);
@@ -60,7 +65,7 @@ const MainApp: React.FC = () => {
           table: 'messages',
           filter: `receiver_id=eq.${profile.id}`,
         },
-        () => {
+        (payload) => {
           if (activeTab !== 'messages') {
             setHasUnreadMessages(true);
             setUnreadMessages((prev) => prev + 1);
@@ -80,7 +85,7 @@ const MainApp: React.FC = () => {
           table: 'notifications',
           filter: `user_id=eq.${profile.id}`,
         },
-        () => {
+        (payload) => {
           if (activeTab !== 'notifications') {
             setHasUnreadNotifications(true);
             setUnreadNotifications((prev) => prev + 1);
@@ -95,28 +100,37 @@ const MainApp: React.FC = () => {
     };
   }, [profile?.id, activeTab]);
 
+  // Open public profile modal or switch to self profile
+  const handleViewProfile = (targetUser: Profile) => {
+    if (profile && targetUser.id === profile.id) {
+      setActiveTab('profile');
+    } else {
+      setSelectedPublicProfile(targetUser);
+    }
+  };
+
+  // Start message from public profile
+  const handleStartMessage = (targetUser: Profile) => {
+    setDirectMessageUser(targetUser);
+    setSelectedPublicProfile(null);
+    setActiveTab('messages');
+  };
+
   if (loading) {
     return (
-      <div className="min-h-screen bg-black flex flex-col items-center justify-center text-[#e5e2e1] gap-4">
-        <h1 className="text-3xl font-extrabold tracking-tight">Void</h1>
-        <Loader2 className="w-6 h-6 animate-spin text-[#1d9bf0]" />
+      <div className="min-h-screen bg-black flex flex-col items-center justify-center text-[#e5e2e1]">
+        <div className="w-12 h-12 rounded-full border-2 border-[#1d9bf0] border-t-transparent animate-spin mb-4" />
+        <p className="text-sm font-semibold tracking-wider text-[#89919d]">Loading Void...</p>
       </div>
     );
   }
 
-  // If user is not authenticated and not in demo mode, show AuthModal
   if (!user && !isDemoMode) {
-    return (
-      <>
-        <AuthModal onOpenSQLHelper={() => setIsSQLModalOpen(true)} />
-        <SQLModal isOpen={isSQLModalOpen} onClose={() => setIsSQLModalOpen(false)} />
-      </>
-    );
+    return <AuthModal />;
   }
 
   const handlePostCreated = (newPost: Post) => {
-    setPosts((prev) => [newPost, ...prev]);
-    setActiveTab('feed');
+    setPosts([newPost, ...posts]);
   };
 
   const handleSearchFromRightBar = (query: string) => {
@@ -146,19 +160,27 @@ const MainApp: React.FC = () => {
               posts={posts}
               setPosts={setPosts}
               onOpenCompose={() => setIsComposeOpen(true)}
+              onViewProfile={handleViewProfile}
             />
           )}
 
           {activeTab === 'explore' && (
-            <ExploreView initialSearchQuery={searchQuery} />
+            <ExploreView
+              initialSearchQuery={searchQuery}
+              onViewProfile={handleViewProfile}
+            />
           )}
 
           {activeTab === 'notifications' && (
-            <NotificationsView />
+            <NotificationsView onViewProfile={handleViewProfile} />
           )}
 
           {activeTab === 'messages' && (
-            <MessagesView onUnreadChange={setUnreadMessages} />
+            <MessagesView
+              initialPartner={directMessageUser}
+              onUnreadChange={setUnreadMessages}
+              onViewProfile={handleViewProfile}
+            />
           )}
 
           {activeTab === 'profile' && (
@@ -170,7 +192,10 @@ const MainApp: React.FC = () => {
 
           {/* Right Sidebar (Hidden on messages tab or small screens) */}
           {activeTab !== 'messages' && (
-            <RightSidebar onSearch={handleSearchFromRightBar} />
+            <RightSidebar
+              onSearch={handleSearchFromRightBar}
+              onViewProfile={handleViewProfile}
+            />
           )}
         </div>
 
@@ -183,6 +208,14 @@ const MainApp: React.FC = () => {
           unreadNotificationsCount={unreadNotifications}
           hasUnreadMessages={hasUnreadMessages}
           hasUnreadNotifications={hasUnreadNotifications}
+        />
+
+        {/* Public Profile View Modal */}
+        <PublicProfileModal
+          user={selectedPublicProfile}
+          isOpen={Boolean(selectedPublicProfile)}
+          onClose={() => setSelectedPublicProfile(null)}
+          onStartMessage={handleStartMessage}
         />
 
         {/* Compose Post Modal */}
