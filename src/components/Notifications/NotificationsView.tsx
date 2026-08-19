@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
+import { triggerFollowNotification } from '../../lib/followService';
 import { Notification } from '../../types';
-import { Heart, Repeat2, User, Settings, Bell } from 'lucide-react';
+import { Heart, Repeat2, User, Settings, Bell, CheckCircle2 } from 'lucide-react';
 
 export const NotificationsView: React.FC = () => {
   const { profile } = useAuth();
@@ -92,11 +93,16 @@ export const NotificationsView: React.FC = () => {
     };
   }, [profile?.id]);
 
-  const toggleFollow = (actorId: string) => {
+  const toggleFollow = async (actorId: string) => {
+    const isNowFollowing = !followingMap[actorId];
     setFollowingMap((prev) => ({
       ...prev,
-      [actorId]: !prev[actorId],
+      [actorId]: isNowFollowing,
     }));
+
+    if (isNowFollowing && profile) {
+      await triggerFollowNotification(profile, actorId);
+    }
   };
 
   const filteredNotifs = tab === 'mentions'
@@ -240,7 +246,7 @@ export const NotificationsView: React.FC = () => {
 
                   {notif.type === 'follow' && (
                     <div className="text-sm text-[#e5e2e1]">
-                      <span className="font-bold">{actor.display_name || actor.username}</span> followed you
+                      <span className="font-bold">@{actor.username}</span> started following you
                     </div>
                   )}
 

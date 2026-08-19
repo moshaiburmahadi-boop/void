@@ -1,13 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
+import { useAuth } from '../../context/AuthContext';
+import { triggerFollowNotification } from '../../lib/followService';
 import { Profile, Post } from '../../types';
-import { Search, User, MessageSquare } from 'lucide-react';
+import { Search, User, MessageSquare, CheckCircle2, UserPlus, UserCheck } from 'lucide-react';
 
 interface ExploreViewProps {
   initialSearchQuery?: string;
 }
 
 export const ExploreView: React.FC<ExploreViewProps> = ({ initialSearchQuery = '' }) => {
+  const { profile } = useAuth();
   const [search, setSearch] = useState(initialSearchQuery);
   const [matchedUsers, setMatchedUsers] = useState<Profile[]>([]);
   const [matchedPosts, setMatchedPosts] = useState<Post[]>([]);
@@ -26,7 +29,11 @@ export const ExploreView: React.FC<ExploreViewProps> = ({ initialSearchQuery = '
             .select('*')
             .or(`username.ilike.%${search}%,display_name.ilike.%${search}%`)
             .limit(10);
-          setMatchedUsers((profiles as Profile[]) || []);
+          
+          const filteredProfiles = (profiles as Profile[] || []).filter(
+            (p) => !profile?.id || p.id !== profile.id
+          );
+          setMatchedUsers(filteredProfiles);
 
           // Search posts
           const { data: posts } = await supabase
@@ -37,10 +44,11 @@ export const ExploreView: React.FC<ExploreViewProps> = ({ initialSearchQuery = '
           setMatchedPosts((posts as Post[]) || []);
         } else {
           // Load suggested real users
-          const { data: profiles } = await supabase
-            .from('profiles')
-            .select('*')
-            .limit(10);
+          let query = supabase.from('profiles').select('*').limit(10);
+          if (profile?.id) {
+            query = query.neq('id', profile.id);
+          }
+          const { data: profiles } = await query;
           setMatchedUsers((profiles as Profile[]) || []);
           setMatchedPosts([]);
         }
@@ -53,10 +61,15 @@ export const ExploreView: React.FC<ExploreViewProps> = ({ initialSearchQuery = '
 
     const timer = setTimeout(runSearch, 300);
     return () => clearTimeout(timer);
-  }, [search]);
+  }, [search, profile?.id]);
 
-  const toggleFollow = (id: string) => {
-    setFollowingMap((prev) => ({ ...prev, [id]: !prev[id] }));
+  const toggleFollow = async (user: Profile) => {
+    const isNowFollowing = !followingMap[user.id];
+    setFollowingMap((prev) => ({ ...prev, [user.id]: isNowFollowing }));
+
+    if (isNowFollowing && profile) {
+      await triggerFollowNotification(profile, user.id);
+    }
   };
 
   return (
@@ -103,20 +116,35 @@ export const ExploreView: React.FC<ExploreViewProps> = ({ initialSearchQuery = '
                         className="w-10 h-10 rounded-full object-cover border border-[#27272a]"
                       />
                       <div>
-                        <p className="text-sm font-bold text-[#e5e2e1]">{u.display_name || u.username}</p>
+                        <div className="flex items-center gap-1">
+                          <p className="text-sm font-bold text-[#e5e2e1]">{u.display_name || u.username}</p>
+                          {u.verified && (
+                            <CheckCircle2 className="w-3.5 h-3.5 text-[#1d9bf0] fill-[#1d9bf0]" />
+                          )}
+                        </div>
                         <p className="text-xs text-[#89919d]">@{u.username}</p>
                       </div>
                     </div>
 
                     <button
-                      onClick={() => toggleFollow(u.id)}
-                      className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all active:scale-95 cursor-pointer ${
+                      onClick={() => toggleFollow(u)}
+                      className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition-all active:scale-95 cursor-pointer flex items-center gap-1 ${
                         isFollowing
-                          ? 'bg-transparent border border-[#3f3f46] text-[#e5e2e1]'
+                          ? 'bg-transparent border border-[#3f3f46] text-[#e5e2e1] hover:border-red-500 hover:text-red-500'
                           : 'bg-[#e5e2e1] text-black hover:bg-white'
                       }`}
                     >
-                      {isFollowing ? 'Following' : 'Follow'}
+                      {isFollowing ? (
+                        <>
+                          <UserCheck className="w-3.5 h-3.5" />
+                          <span>Following</span>
+                        </>
+                      ) : (
+                        <>
+                          <UserPlus className="w-3.5 h-3.5" />
+                          <span>Follow</span>
+                        </>
+                      )}
                     </button>
                   </div>
                 );

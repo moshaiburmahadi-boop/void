@@ -128,7 +128,31 @@ export const MessagesView: React.FC<MessagesViewProps> = ({ onUnreadChange }) =>
 
             if (isRelevant) {
               setMessages((prev) => {
-                if (prev.some((m) => m.id === newMsg.id)) return prev;
+                // 1. Deduplicate by exact database ID
+                if (prev.some((m) => m.id === newMsg.id)) {
+                  return prev;
+                }
+
+                // 2. Deduplicate / replace optimistic message with real message
+                const tempIndex = prev.findIndex(
+                  (m) =>
+                    m.id.startsWith('temp_') &&
+                    m.sender_id === newMsg.sender_id &&
+                    m.receiver_id === newMsg.receiver_id &&
+                    m.content === newMsg.content
+                );
+
+                if (tempIndex !== -1) {
+                  const updated = [...prev];
+                  updated[tempIndex] = {
+                    ...newMsg,
+                    sender_profile: newMsg.sender_id === profile.id ? profile : activePartner,
+                    receiver_profile: newMsg.receiver_id === profile.id ? profile : activePartner,
+                  };
+                  return updated;
+                }
+
+                // 3. New message from partner or fresh insert
                 return [
                   ...prev,
                   {
@@ -156,8 +180,9 @@ export const MessagesView: React.FC<MessagesViewProps> = ({ onUnreadChange }) =>
     const content = inputText.trim();
     setInputText('');
 
-    const newMsg: Message = {
-      id: `msg-${Date.now()}`,
+    const tempId = `temp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const optimisticMsg: Message = {
+      id: tempId,
       sender_id: profile.id,
       receiver_id: activePartner.id,
       content,
@@ -166,15 +191,33 @@ export const MessagesView: React.FC<MessagesViewProps> = ({ onUnreadChange }) =>
       receiver_profile: activePartner,
     };
 
-    setMessages((prev) => [...prev, newMsg]);
+    setMessages((prev) => [...prev, optimisticMsg]);
 
     if (isSupabaseConfigured) {
       try {
-        await supabase.from('messages').insert({
-          sender_id: profile.id,
-          receiver_id: activePartner.id,
-          content,
-        });
+        const { data, error } = await supabase
+          .from('messages')
+          .insert({
+            sender_id: profile.id,
+            receiver_id: activePartner.id,
+            content,
+          })
+          .select('*, sender_profile:sender_id(*), receiver_profile:receiver_id(*)')
+          .single();
+
+        if (!error && data) {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === tempId
+                ? {
+                    ...data,
+                    sender_profile: profile,
+                    receiver_profile: activePartner,
+                  }
+                : m
+            )
+          );
+        }
       } catch (err) {
         console.warn('Error sending message:', err);
       }
