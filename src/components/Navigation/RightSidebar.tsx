@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
-import { triggerFollowNotification } from '../../lib/followService';
+import { useFollow } from '../../context/FollowContext';
 import { Profile } from '../../types';
 import { Search, Loader2, X, CheckCircle2, UserPlus, UserCheck } from 'lucide-react';
 
@@ -11,11 +11,11 @@ interface RightSidebarProps {
 
 export const RightSidebar: React.FC<RightSidebarProps> = ({ onSearch }) => {
   const { profile } = useAuth();
+  const { isFollowing, toggleFollow } = useFollow();
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Profile[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
-  const [followingMap, setFollowingMap] = useState<Record<string, boolean>>({});
   const [suggestedMembers, setSuggestedMembers] = useState<Profile[]>([]);
   const searchContainerRef = useRef<HTMLDivElement>(null);
 
@@ -97,18 +97,6 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ onSearch }) => {
     return () => clearTimeout(timer);
   }, [searchQuery, profile?.id]);
 
-  const handleFollowToggle = async (targetUser: Profile) => {
-    const isNowFollowing = !followingMap[targetUser.id];
-    setFollowingMap((prev) => ({
-      ...prev,
-      [targetUser.id]: isNowFollowing,
-    }));
-
-    if (isNowFollowing && profile) {
-      await triggerFollowNotification(profile, targetUser.id);
-    }
-  };
-
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (onSearch && searchQuery.trim()) {
@@ -159,7 +147,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ onSearch }) => {
               </div>
             ) : (
               searchResults.map((user) => {
-                const isFollowing = followingMap[user.id];
+                const followed = isFollowing(user.id);
                 return (
                   <div
                     key={user.id}
@@ -188,17 +176,18 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ onSearch }) => {
                     </div>
 
                     <button
-                      onClick={() => handleFollowToggle(user)}
-                      className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition-all active:scale-95 cursor-pointer shrink-0 flex items-center gap-1 ${
-                        isFollowing
-                          ? 'bg-transparent border border-[#3f3f46] text-[#e5e2e1] hover:border-red-500 hover:text-red-500'
+                      onClick={() => toggleFollow(user)}
+                      className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition-all active:scale-95 cursor-pointer shrink-0 flex items-center gap-1 group ${
+                        followed
+                          ? 'bg-transparent border border-[#3f3f46] text-[#e5e2e1] hover:border-red-500 hover:text-red-500 hover:bg-red-950/20'
                           : 'bg-[#e5e2e1] text-black hover:bg-white'
                       }`}
                     >
-                      {isFollowing ? (
+                      {followed ? (
                         <>
-                          <UserCheck className="w-3.5 h-3.5" />
-                          <span>Following</span>
+                          <UserCheck className="w-3.5 h-3.5 group-hover:hidden" />
+                          <span className="group-hover:hidden">Following</span>
+                          <span className="hidden group-hover:inline">Unfollow</span>
                         </>
                       ) : (
                         <>
@@ -221,7 +210,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ onSearch }) => {
           <h2 className="text-base font-bold p-4 text-[#e5e2e1]">Who to follow</h2>
           <div className="divide-y divide-[#201f1f]">
             {suggestedMembers.map((user) => {
-              const isFollowing = followingMap[user.id];
+              const followed = isFollowing(user.id);
               return (
                 <div
                   key={user.id}
@@ -250,17 +239,18 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ onSearch }) => {
                   </div>
 
                   <button
-                    onClick={() => handleFollowToggle(user)}
-                    className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition-all active:scale-95 cursor-pointer shrink-0 flex items-center gap-1 ${
-                      isFollowing
-                        ? 'bg-transparent border border-[#3f3f46] text-[#e5e2e1] hover:border-red-500 hover:text-red-500'
+                    onClick={() => toggleFollow(user)}
+                    className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition-all active:scale-95 cursor-pointer shrink-0 flex items-center gap-1 group ${
+                      followed
+                        ? 'bg-transparent border border-[#3f3f46] text-[#e5e2e1] hover:border-red-500 hover:text-red-500 hover:bg-red-950/20'
                         : 'bg-[#e5e2e1] text-black hover:bg-white'
                     }`}
                   >
-                    {isFollowing ? (
+                    {followed ? (
                       <>
-                        <UserCheck className="w-3.5 h-3.5" />
-                        <span>Following</span>
+                        <UserCheck className="w-3.5 h-3.5 group-hover:hidden" />
+                        <span className="group-hover:hidden">Following</span>
+                        <span className="hidden group-hover:inline">Unfollow</span>
                       </>
                     ) : (
                       <>

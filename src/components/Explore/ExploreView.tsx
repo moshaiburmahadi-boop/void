@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
-import { triggerFollowNotification } from '../../lib/followService';
+import { useFollow } from '../../context/FollowContext';
 import { Profile, Post } from '../../types';
 import { Search, User, MessageSquare, CheckCircle2, UserPlus, UserCheck } from 'lucide-react';
 
@@ -11,11 +11,11 @@ interface ExploreViewProps {
 
 export const ExploreView: React.FC<ExploreViewProps> = ({ initialSearchQuery = '' }) => {
   const { profile } = useAuth();
+  const { isFollowing, toggleFollow } = useFollow();
   const [search, setSearch] = useState(initialSearchQuery);
   const [matchedUsers, setMatchedUsers] = useState<Profile[]>([]);
   const [matchedPosts, setMatchedPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(false);
-  const [followingMap, setFollowingMap] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     const runSearch = async () => {
@@ -29,8 +29,8 @@ export const ExploreView: React.FC<ExploreViewProps> = ({ initialSearchQuery = '
             .select('*')
             .or(`username.ilike.%${search}%,display_name.ilike.%${search}%`)
             .limit(10);
-          
-          const filteredProfiles = (profiles as Profile[] || []).filter(
+
+          const filteredProfiles = ((profiles as Profile[]) || []).filter(
             (p) => !profile?.id || p.id !== profile.id
           );
           setMatchedUsers(filteredProfiles);
@@ -63,15 +63,6 @@ export const ExploreView: React.FC<ExploreViewProps> = ({ initialSearchQuery = '
     return () => clearTimeout(timer);
   }, [search, profile?.id]);
 
-  const toggleFollow = async (user: Profile) => {
-    const isNowFollowing = !followingMap[user.id];
-    setFollowingMap((prev) => ({ ...prev, [user.id]: isNowFollowing }));
-
-    if (isNowFollowing && profile) {
-      await triggerFollowNotification(profile, user.id);
-    }
-  };
-
   return (
     <main className="w-full max-w-[600px] lg:ml-[275px] min-h-screen border-r border-[#201f1f] relative pb-20 lg:pb-8 select-none">
       {/* Search Header */}
@@ -103,7 +94,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({ initialSearchQuery = '
           ) : (
             <div className="space-y-2">
               {matchedUsers.map((u) => {
-                const isFollowing = followingMap[u.id];
+                const followed = isFollowing(u.id);
                 return (
                   <div
                     key={u.id}
@@ -111,13 +102,18 @@ export const ExploreView: React.FC<ExploreViewProps> = ({ initialSearchQuery = '
                   >
                     <div className="flex items-center gap-3">
                       <img
-                        src={u.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80'}
+                        src={
+                          u.avatar_url ||
+                          'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80'
+                        }
                         alt={u.username}
                         className="w-10 h-10 rounded-full object-cover border border-[#27272a]"
                       />
                       <div>
                         <div className="flex items-center gap-1">
-                          <p className="text-sm font-bold text-[#e5e2e1]">{u.display_name || u.username}</p>
+                          <p className="text-sm font-bold text-[#e5e2e1]">
+                            {u.display_name || u.username}
+                          </p>
                           {u.verified && (
                             <CheckCircle2 className="w-3.5 h-3.5 text-[#1d9bf0] fill-[#1d9bf0]" />
                           )}
@@ -128,16 +124,17 @@ export const ExploreView: React.FC<ExploreViewProps> = ({ initialSearchQuery = '
 
                     <button
                       onClick={() => toggleFollow(u)}
-                      className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition-all active:scale-95 cursor-pointer flex items-center gap-1 ${
-                        isFollowing
-                          ? 'bg-transparent border border-[#3f3f46] text-[#e5e2e1] hover:border-red-500 hover:text-red-500'
+                      className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition-all active:scale-95 cursor-pointer flex items-center gap-1 group ${
+                        followed
+                          ? 'bg-transparent border border-[#3f3f46] text-[#e5e2e1] hover:border-red-500 hover:text-red-500 hover:bg-red-950/20'
                           : 'bg-[#e5e2e1] text-black hover:bg-white'
                       }`}
                     >
-                      {isFollowing ? (
+                      {followed ? (
                         <>
-                          <UserCheck className="w-3.5 h-3.5" />
-                          <span>Following</span>
+                          <UserCheck className="w-3.5 h-3.5 group-hover:hidden" />
+                          <span className="group-hover:hidden">Following</span>
+                          <span className="hidden group-hover:inline">Unfollow</span>
                         </>
                       ) : (
                         <>

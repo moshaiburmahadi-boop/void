@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { FollowProvider } from './context/FollowContext';
 import { ActiveTab, Post } from './types';
 import { INITIAL_POSTS } from './data/mockData';
 import { DesktopSidebar } from './components/Navigation/DesktopSidebar';
@@ -148,7 +149,9 @@ const MainApp: React.FC = () => {
 export default function App() {
   return (
     <AuthProvider>
-      <MainApp />
+      <FollowProvider>
+        <MainApp />
+      </FollowProvider>
     </AuthProvider>
   );
 }

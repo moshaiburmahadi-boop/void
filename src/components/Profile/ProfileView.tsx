@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
+import { useFollow } from '../../context/FollowContext';
 import { Post, Profile } from '../../types';
 import {
   ArrowLeft,
@@ -26,6 +27,7 @@ interface ProfileViewProps {
 
 export const ProfileView: React.FC<ProfileViewProps> = ({ posts, onBackToFeed, onOpenSQLHelper }) => {
   const { profile, signOut, updateProfile } = useAuth();
+  const { getFollowerCount, getFollowingCount } = useFollow();
   const [activeSubTab, setActiveSubTab] = useState<'posts' | 'replies' | 'highlights' | 'media' | 'likes'>('posts');
   const [isEditing, setIsEditing] = useState(false);
   const [displayName, setDisplayName] = useState(profile?.display_name || '');
@@ -176,11 +178,15 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ posts, onBackToFeed, o
         {/* Following / Followers count */}
         <div className="flex gap-5 text-sm">
           <div className="cursor-pointer hover:underline">
-            <span className="font-bold text-[#e5e2e1]">0</span>{' '}
+            <span className="font-bold text-[#e5e2e1]">
+              {profile?.id ? getFollowingCount(profile.id, 0) : 0}
+            </span>{' '}
             <span className="text-[#89919d]">Following</span>
           </div>
           <div className="cursor-pointer hover:underline">
-            <span className="font-bold text-[#e5e2e1]">0</span>{' '}
+            <span className="font-bold text-[#e5e2e1]">
+              {profile?.id ? getFollowerCount(profile.id, 0) : 0}
+            </span>{' '}
             <span className="text-[#89919d]">Followers</span>
           </div>
         </div>

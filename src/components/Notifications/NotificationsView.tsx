@@ -1,21 +1,22 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
+import { useFollow } from '../../context/FollowContext';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
-import { triggerFollowNotification } from '../../lib/followService';
 import { Notification } from '../../types';
-import { Heart, Repeat2, User, Settings, Bell, CheckCircle2 } from 'lucide-react';
+import { Heart, Repeat2, User, Settings, Bell, CheckCircle2, UserCheck, UserPlus } from 'lucide-react';
 
 export const NotificationsView: React.FC = () => {
   const { profile } = useAuth();
+  const { isFollowing, toggleFollow } = useFollow();
   const [tab, setTab] = useState<'all' | 'mentions'>('all');
   const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [followingMap, setFollowingMap] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
-    if (!profile || !isSupabaseConfigured) return;
+    if (!profile?.id) return;
 
-    // Fetch notifications from Supabase
     const fetchNotifications = async () => {
+      if (!isSupabaseConfigured) return;
+
       try {
         const { data, error } = await supabase
           .from('notifications')
@@ -24,7 +25,6 @@ export const NotificationsView: React.FC = () => {
             user_id,
             actor_id,
             type,
-            post_id,
             created_at,
             actor_profile:actor_id(*)
           `)
@@ -32,11 +32,11 @@ export const NotificationsView: React.FC = () => {
           .order('created_at', { ascending: false });
 
         if (!error && data) {
-          const formattedNotifs: Notification[] = (data as unknown as any[]).map((n) => ({
+          const formatted = (data as unknown as any[]).map((n) => ({
             ...n,
             actor_profile: Array.isArray(n.actor_profile) ? n.actor_profile[0] : n.actor_profile,
           }));
-          setNotifications(formattedNotifs);
+          setNotifications(formatted);
         }
       } catch (err) {
         console.warn('Error fetching notifications:', err);
@@ -58,7 +58,6 @@ export const NotificationsView: React.FC = () => {
         },
         async (payload) => {
           const newNotif = payload.new as Notification;
-          // Fetch actor profile for new notification
           let actorProfile = null;
           try {
             const { data } = await supabase
@@ -92,18 +91,6 @@ export const NotificationsView: React.FC = () => {
       supabase.removeChannel(channel);
     };
   }, [profile?.id]);
-
-  const toggleFollow = async (actorId: string) => {
-    const isNowFollowing = !followingMap[actorId];
-    setFollowingMap((prev) => ({
-      ...prev,
-      [actorId]: isNowFollowing,
-    }));
-
-    if (isNowFollowing && profile) {
-      await triggerFollowNotification(profile, actorId);
-    }
-  };
 
   const filteredNotifs = tab === 'mentions'
     ? notifications.filter((n) => n.type === 'mention')
@@ -166,7 +153,7 @@ export const NotificationsView: React.FC = () => {
               avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80',
               created_at: new Date().toISOString(),
             };
-            const isFollowing = followingMap[notif.actor_id];
+            const followed = isFollowing(notif.actor_id);
 
             return (
               <article
@@ -205,14 +192,25 @@ export const NotificationsView: React.FC = () => {
 
                       {notif.type === 'follow' && (
                         <button
-                          onClick={() => toggleFollow(notif.actor_id)}
-                          className={`px-4 py-1 rounded-full text-xs font-bold transition-all active:scale-95 cursor-pointer ${
-                            isFollowing
-                              ? 'bg-transparent border border-[#3f3f46] text-[#e5e2e1]'
+                          onClick={() => toggleFollow(actor)}
+                          className={`px-3.5 py-1 rounded-full text-xs font-bold transition-all active:scale-95 cursor-pointer flex items-center gap-1 group ${
+                            followed
+                              ? 'bg-transparent border border-[#3f3f46] text-[#e5e2e1] hover:border-red-500 hover:text-red-500 hover:bg-red-950/20'
                               : 'bg-[#e5e2e1] text-black hover:bg-white'
                           }`}
                         >
-                          {isFollowing ? 'Following' : 'Follow'}
+                          {followed ? (
+                            <>
+                              <UserCheck className="w-3.5 h-3.5 group-hover:hidden" />
+                              <span className="group-hover:hidden">Following</span>
+                              <span className="hidden group-hover:inline">Unfollow</span>
+                            </>
+                          ) : (
+                            <>
+                              <UserPlus className="w-3.5 h-3.5" />
+                              <span>Follow Back</span>
+                            </>
+                          )}
                         </button>
                       )}
                     </div>
@@ -263,6 +261,13 @@ export const NotificationsView: React.FC = () => {
                       </p>
                     </>
                   )}
+
+                  <span className="text-[11px] text-[#89919d] mt-1">
+                    {new Date(notif.created_at).toLocaleTimeString([], {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </span>
                 </div>
               </article>
             );

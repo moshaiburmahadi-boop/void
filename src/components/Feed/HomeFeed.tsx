@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
+import { useFollow } from '../../context/FollowContext';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { Post } from '../../types';
 import { INITIAL_POSTS } from '../../data/mockData';
@@ -26,6 +27,7 @@ interface HomeFeedProps {
 
 export const HomeFeed: React.FC<HomeFeedProps> = ({ posts, setPosts, onOpenCompose }) => {
   const { profile } = useAuth();
+  const { isFollowing } = useFollow();
   const [feedTab, setFeedTab] = useState<'for_you' | 'following'>('for_you');
   const [composeText, setComposeText] = useState('');
   const [composeImage, setComposeImage] = useState('');
@@ -33,7 +35,7 @@ export const HomeFeed: React.FC<HomeFeedProps> = ({ posts, setPosts, onOpenCompo
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // Fetch posts from Supabase if configured
+  // Fetch posts from Supabase on mount
   const fetchPosts = async () => {
     if (!isSupabaseConfigured) return;
     setIsRefreshing(true);
@@ -52,7 +54,7 @@ export const HomeFeed: React.FC<HomeFeedProps> = ({ posts, setPosts, onOpenCompo
 
       if (error) {
         console.warn('Error fetching posts from Supabase:', error);
-      } else if (data && data.length > 0) {
+      } else if (data) {
         // Also fetch user's likes
         let userLikes = new Set<string>();
         if (profile?.id) {
@@ -82,6 +84,81 @@ export const HomeFeed: React.FC<HomeFeedProps> = ({ posts, setPosts, onOpenCompo
       setIsRefreshing(false);
     }
   };
+
+  useEffect(() => {
+    fetchPosts();
+  }, [profile?.id]);
+
+  // Realtime subscription: broadcast all posts to all users instantly
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
+
+    const channel = supabase
+      .channel('public_global_posts')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'posts',
+        },
+        async (payload) => {
+          const newPost = payload.new as any;
+          let authorProfile = null;
+          try {
+            const { data } = await supabase
+              .from('profiles')
+              .select('*')
+              .eq('id', newPost.user_id)
+              .single();
+            authorProfile = data;
+          } catch (e) {
+            console.warn(e);
+          }
+
+          setPosts((prev) => {
+            if (prev.some((p) => p.id === newPost.id)) {
+              return prev;
+            }
+            return [
+              {
+                ...newPost,
+                profiles: authorProfile || {
+                  id: newPost.user_id,
+                  username: 'member',
+                  display_name: 'Member',
+                  avatar_url:
+                    'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80',
+                  created_at: newPost.created_at,
+                },
+                likes_count: 0,
+                user_has_liked: false,
+                replies_count: 0,
+                reposts_count: 0,
+                views_count: '0',
+              },
+              ...prev,
+            ];
+          });
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'DELETE',
+          schema: 'public',
+          table: 'posts',
+        },
+        (payload) => {
+          setPosts((prev) => prev.filter((p) => p.id !== payload.old.id));
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   const handleInlineCompose = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -261,10 +338,11 @@ export const HomeFeed: React.FC<HomeFeedProps> = ({ posts, setPosts, onOpenCompo
     }
   };
 
-  // Filter based on tab
-  const displayedPosts = feedTab === 'following'
-    ? posts.filter((p) => p.user_id === profile?.id || p.user_id.includes('alex'))
-    : posts;
+  // Filter based on tab: 'for_you' shows all posts from all users, 'following' shows followed users + self
+  const displayedPosts =
+    feedTab === 'following'
+      ? posts.filter((p) => p.user_id === profile?.id || isFollowing(p.user_id))
+      : posts;
 
   return (
     <main className="w-full max-w-[600px] lg:ml-[275px] min-h-screen border-r border-[#201f1f] relative pb-20 lg:pb-8">
