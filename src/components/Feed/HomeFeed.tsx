@@ -68,11 +68,11 @@ export const HomeFeed: React.FC<HomeFeedProps> = ({ posts, setPosts, onOpenCompo
         const formattedPosts: Post[] = (data as unknown as any[]).map((p) => ({
           ...p,
           profiles: Array.isArray(p.profiles) ? p.profiles[0] : p.profiles,
-          likes_count: Math.floor(Math.random() * 20) + (userLikes.has(p.id) ? 1 : 0),
+          likes_count: userLikes.has(p.id) ? 1 : 0,
           user_has_liked: userLikes.has(p.id),
-          replies_count: Math.floor(Math.random() * 8),
-          reposts_count: Math.floor(Math.random() * 5),
-          views_count: `${(Math.random() * 5 + 0.5).toFixed(1)}K`,
+          replies_count: 0,
+          reposts_count: 0,
+          views_count: '0',
         }));
         setPosts(formattedPosts);
       }
@@ -487,7 +487,7 @@ export const HomeFeed: React.FC<HomeFeedProps> = ({ posts, setPosts, onOpenCompo
                         <MessageCircle className="w-4 h-4" />
                       </div>
                       <span className="text-xs font-medium">
-                        {post.replies_count || 12}
+                        {post.replies_count || 0}
                       </span>
                     </button>
 
@@ -505,7 +505,7 @@ export const HomeFeed: React.FC<HomeFeedProps> = ({ posts, setPosts, onOpenCompo
                         <Repeat2 className="w-4 h-4" />
                       </div>
                       <span className="text-xs font-medium">
-                        {post.reposts_count || 4}
+                        {post.reposts_count || 0}
                       </span>
                     </button>
 
@@ -540,7 +540,7 @@ export const HomeFeed: React.FC<HomeFeedProps> = ({ posts, setPosts, onOpenCompo
                         <BarChart3 className="w-4 h-4" />
                       </div>
                       <span className="text-xs font-medium">
-                        {post.views_count || '1.2K'}
+                        {post.views_count || 0}
                       </span>
                     </button>
 

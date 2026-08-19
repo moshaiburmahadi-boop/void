@@ -1,13 +1,13 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { Database, AlertCircle, Sparkles, Loader2 } from 'lucide-react';
+import { AlertCircle, Loader2 } from 'lucide-react';
 
 interface AuthModalProps {
   onOpenSQLHelper?: () => void;
 }
 
-export const AuthModal: React.FC<AuthModalProps> = ({ onOpenSQLHelper }) => {
-  const { signIn, signUp, enterDemoMode, isConfigured } = useAuth();
+export const AuthModal: React.FC<AuthModalProps> = () => {
+  const { signIn, signUp, enterDemoMode } = useAuth();
   const [mode, setMode] = useState<'login' | 'signup'>('login');
   const [fullName, setFullName] = useState('');
   const [username, setUsername] = useState('');
@@ -44,28 +44,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onOpenSQLHelper }) => {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-95 p-4 overflow-y-auto">
       <main className="w-full max-w-md my-auto flex flex-col items-center justify-center relative">
         {/* Brand Logo */}
-        <h1 className="text-3xl sm:text-4xl font-extrabold text-[#e5e2e1] mb-8 tracking-tight font-sans">
+        <h1 className="text-4xl font-black text-[#e5e2e1] mb-8 tracking-tight font-sans">
           Void
         </h1>
-
-        {/* Database notice if not yet connected */}
-        {!isConfigured && (
-          <div className="w-full mb-6 p-3.5 bg-[#18181b] border border-[#27272a] rounded-2xl flex items-start gap-3 text-xs text-[#a1a1aa]">
-            <Database className="w-4 h-4 text-[#1d9bf0] shrink-0 mt-0.5" />
-            <div className="flex-1">
-              <span className="text-[#e5e2e1] font-semibold">Supabase Ready: </span>
-              Connect your project URL & Anon Key in Settings or explore with live guest data.
-              {onOpenSQLHelper && (
-                <button
-                  onClick={onOpenSQLHelper}
-                  className="block mt-1 text-[#1d9bf0] hover:underline font-medium"
-                >
-                  View SQL Migration Schema →
-                </button>
-              )}
-            </div>
-          </div>
-        )}
 
         {/* Form Container */}
         <div className="w-full flex flex-col gap-4">
@@ -75,7 +56,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onOpenSQLHelper }) => {
               id="tab-login"
               type="button"
               onClick={() => { setMode('login'); setError(null); }}
-              className={`flex-1 rounded-full py-2.5 text-center text-sm font-semibold transition-all ${
+              className={`flex-1 rounded-full py-2.5 text-center text-sm font-semibold transition-all cursor-pointer ${
                 mode === 'login'
                   ? 'bg-[#e5e2e1] text-[#131313] shadow-md'
                   : 'text-[#89919d] hover:text-[#e5e2e1]'
@@ -87,7 +68,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onOpenSQLHelper }) => {
               id="tab-signup"
               type="button"
               onClick={() => { setMode('signup'); setError(null); }}
-              className={`flex-1 rounded-full py-2.5 text-center text-sm font-semibold transition-all ${
+              className={`flex-1 rounded-full py-2.5 text-center text-sm font-semibold transition-all cursor-pointer ${
                 mode === 'signup'
                   ? 'bg-[#e5e2e1] text-[#131313] shadow-md'
                   : 'text-[#89919d] hover:text-[#e5e2e1]'
@@ -98,25 +79,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onOpenSQLHelper }) => {
           </div>
 
           {error && (
-            <div className="p-3 bg-red-950/40 border border-red-800/60 rounded-xl text-red-300 text-xs flex flex-col gap-2">
-              <div className="flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
-                <span className="font-semibold">{error}</span>
-              </div>
-              {error.includes('Invalid path') && (
-                <div className="text-[11px] text-red-200/80 pl-6 space-y-1">
-                  <p>• Supabase Project Settings → <strong>API</strong> → Copy the <strong>anon public key</strong> (starts with <code className="bg-black/40 px-1 py-0.5 rounded">eyJhbGci...</code>).</p>
-                  {onOpenSQLHelper && (
-                    <button
-                      type="button"
-                      onClick={onOpenSQLHelper}
-                      className="text-[#1d9bf0] underline font-medium block pt-1"
-                    >
-                      Update API Keys in Settings →
-                    </button>
-                  )}
-                </div>
-              )}
+            <div className="p-3 bg-red-950/40 border border-red-800/60 rounded-xl text-red-300 text-xs flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
+              <span>{error}</span>
             </div>
           )}
 
@@ -179,7 +144,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onOpenSQLHelper }) => {
               id="btn-submit"
               type="submit"
               disabled={loading}
-              className="w-full mt-2 bg-[#e5e2e1] text-[#131313] font-bold text-base rounded-full py-3.5 hover:bg-white active:scale-[0.99] transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+              className="w-full mt-2 bg-[#e5e2e1] text-[#131313] font-bold text-base rounded-full py-3.5 hover:bg-white active:scale-[0.99] transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 shadow-md"
             >
               {loading && <Loader2 className="w-4 h-4 animate-spin" />}
               {mode === 'login' ? 'Login' : 'Create Account'}
@@ -194,17 +159,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onOpenSQLHelper }) => {
             </span>
             <div className="flex-grow border-t border-[#27272a]" />
           </div>
-
-          {/* Instant Demo Access Button */}
-          <button
-            id="btn-guest-mode"
-            type="button"
-            onClick={enterDemoMode}
-            className="w-full bg-[#18181b] border border-[#27272a] text-[#e5e2e1] rounded-full py-3.5 text-sm font-semibold flex justify-center items-center gap-2 hover:bg-[#27272a] hover:border-[#3f3f46] transition-all active:scale-[0.99] cursor-pointer"
-          >
-            <Sparkles className="w-4 h-4 text-[#1d9bf0]" />
-            Continue as Guest (Demo Mode)
-          </button>
 
           {/* Social Logins */}
           <div className="flex flex-col gap-2.5 w-full">

@@ -131,43 +131,56 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ posts, onBackToFeed, o
         </div>
 
         {/* Bio */}
-        <p className="text-sm text-[#e5e2e1] leading-relaxed mb-4 whitespace-pre-wrap">
-          {profile?.bio || 'Building on Void. Synthesizing chaos into minimalist grids.'}
-        </p>
+        {profile?.bio && (
+          <p className="text-sm text-[#e5e2e1] leading-relaxed mb-4 whitespace-pre-wrap">
+            {profile.bio}
+          </p>
+        )}
 
         {/* Meta details (location, website, joined) */}
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-[#89919d] mb-4">
-          <div className="flex items-center gap-1">
-            <MapPin className="w-4 h-4 text-[#89919d]" />
-            <span>{profile?.location || 'Neo-Tokyo'}</span>
-          </div>
+          {profile?.location && (
+            <div className="flex items-center gap-1">
+              <MapPin className="w-4 h-4 text-[#89919d]" />
+              <span>{profile.location}</span>
+            </div>
+          )}
 
-          <div className="flex items-center gap-1">
-            <LinkIcon className="w-4 h-4 text-[#89919d]" />
-            <a
-              href={profile?.website || '#'}
-              target="_blank"
-              rel="noreferrer"
-              className="text-[#1d9bf0] hover:underline"
-            >
-              {profile?.website?.replace(/^https?:\/\//, '') || 'arivera.dev'}
-            </a>
-          </div>
+          {profile?.website && (
+            <div className="flex items-center gap-1">
+              <LinkIcon className="w-4 h-4 text-[#89919d]" />
+              <a
+                href={profile.website.startsWith('http') ? profile.website : `https://${profile.website}`}
+                target="_blank"
+                rel="noreferrer"
+                className="text-[#1d9bf0] hover:underline"
+              >
+                {profile.website.replace(/^https?:\/\//, '')}
+              </a>
+            </div>
+          )}
 
           <div className="flex items-center gap-1">
             <Calendar className="w-4 h-4 text-[#89919d]" />
-            <span>Joined March 2021</span>
+            <span>
+              {profile?.created_at
+                ? `Joined ${new Date(profile.created_at).toLocaleDateString('en-US', {
+                    month: 'long',
+                    year: 'numeric',
+                  })}`
+                : 'Joined recently'}
+            </span>
           </div>
         </div>
 
         {/* Following / Followers count */}
         <div className="flex gap-5 text-sm">
           <div className="cursor-pointer hover:underline">
-            <span className="font-bold text-[#e5e2e1]">342</span>{' '}
+            <span className="font-bold text-[#e5e2e1]">0</span>{' '}
             <span className="text-[#89919d]">Following</span>
           </div>
           <div className="cursor-pointer hover:underline">
-            <span className="font-bold text-[#e5e2e1]">1.2K</span>{' '}
+            <span className="font-bold text-[#e5e2e1]">0</span>{' '}
             <span className="text-[#89919d]">Followers</span>
           </div>
         </div>

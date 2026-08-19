@@ -72,7 +72,6 @@ const MainApp: React.FC = () => {
           activeTab={activeTab}
           setActiveTab={setActiveTab}
           onOpenCompose={() => setIsComposeOpen(true)}
-          onOpenSQLHelper={() => setIsSQLModalOpen(true)}
           onOpenSettings={() => setIsSettingsModalOpen(true)}
           unreadMessagesCount={unreadMessages}
           unreadNotificationsCount={unreadNotifications}
@@ -104,7 +103,6 @@ const MainApp: React.FC = () => {
             <ProfileView
               posts={posts}
               onBackToFeed={() => setActiveTab('feed')}
-              onOpenSQLHelper={() => setIsSQLModalOpen(true)}
             />
           )}
 

@@ -8,10 +8,7 @@ import {
   Mail,
   User as UserIcon,
   Settings,
-  HelpCircle,
-  Database,
   LogOut,
-  Sparkles,
   CheckCircle2,
 } from 'lucide-react';
 
@@ -19,7 +16,6 @@ interface DesktopSidebarProps {
   activeTab: ActiveTab;
   setActiveTab: (tab: ActiveTab) => void;
   onOpenCompose: () => void;
-  onOpenSQLHelper: () => void;
   onOpenSettings: () => void;
   unreadMessagesCount?: number;
   unreadNotificationsCount?: number;
@@ -29,12 +25,11 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
   activeTab,
   setActiveTab,
   onOpenCompose,
-  onOpenSQLHelper,
   onOpenSettings,
   unreadMessagesCount = 0,
   unreadNotificationsCount = 0,
 }) => {
-  const { profile, signOut, isDemoMode, isConfigured } = useAuth();
+  const { profile, signOut } = useAuth();
 
   return (
     <nav className="fixed left-0 top-0 h-screen w-[275px] hidden lg:flex flex-col border-r border-[#201f1f] bg-[#000000] py-5 px-4 z-40 select-none">
@@ -47,14 +42,6 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
           <span className="text-3xl font-black tracking-tight text-[#e5e2e1] group-hover:text-white transition-colors">
             Void
           </span>
-          {isDemoMode && (
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#18181b] border border-[#27272a] text-[#89919d] font-mono">
-              Demo
-            </span>
-          )}
-          {isConfigured && (
-            <span className="w-2 h-2 rounded-full bg-emerald-400" title="Connected to Supabase" />
-          )}
         </div>
       </div>
 
@@ -144,16 +131,8 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
         </button>
       </div>
 
-      {/* Footer / Utilities */}
+      {/* Footer / User Profile & Settings */}
       <div className="mt-auto flex flex-col gap-1.5 pt-4 border-t border-[#201f1f]">
-        <button
-          onClick={onOpenSQLHelper}
-          className="flex items-center gap-3 py-2 px-3 text-[#89919d] hover:text-[#1d9bf0] hover:bg-[#131313] rounded-full text-xs font-semibold transition-colors cursor-pointer"
-        >
-          <Database className="w-4 h-4 text-[#1d9bf0]" />
-          <span>SQL Schema & RLS</span>
-        </button>
-
         <button
           onClick={onOpenSettings}
           className="flex items-center gap-3 py-2 px-3 text-[#89919d] hover:text-[#e5e2e1] hover:bg-[#131313] rounded-full text-xs font-medium transition-colors cursor-pointer"
