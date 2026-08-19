@@ -1,0 +1,329 @@
+import React, { useState } from 'react';
+import { useAuth } from '../../context/AuthContext';
+import { Post, Profile } from '../../types';
+import {
+  ArrowLeft,
+  Calendar,
+  MapPin,
+  Link as LinkIcon,
+  CheckCircle2,
+  Edit2,
+  LogOut,
+  Heart,
+  MessageCircle,
+  Repeat2,
+  BarChart3,
+  Bookmark,
+  Check,
+  X,
+} from 'lucide-react';
+
+interface ProfileViewProps {
+  posts: Post[];
+  onBackToFeed: () => void;
+  onOpenSQLHelper?: () => void;
+}
+
+export const ProfileView: React.FC<ProfileViewProps> = ({ posts, onBackToFeed, onOpenSQLHelper }) => {
+  const { profile, signOut, updateProfile } = useAuth();
+  const [activeSubTab, setActiveSubTab] = useState<'posts' | 'replies' | 'highlights' | 'media' | 'likes'>('posts');
+  const [isEditing, setIsEditing] = useState(false);
+  const [displayName, setDisplayName] = useState(profile?.display_name || '');
+  const [bio, setBio] = useState(profile?.bio || '');
+  const [location, setLocation] = useState(profile?.location || '');
+  const [website, setWebsite] = useState(profile?.website || '');
+  const [avatarUrl, setAvatarUrl] = useState(profile?.avatar_url || '');
+
+  const userPosts = posts.filter(
+    (p) => p.user_id === profile?.id || p.profiles?.username === profile?.username
+  );
+
+  const handleSaveProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await updateProfile({
+      display_name: displayName,
+      bio,
+      location,
+      website,
+      avatar_url: avatarUrl,
+    });
+    setIsEditing(false);
+  };
+
+  return (
+    <main className="w-full max-w-[600px] lg:ml-[275px] min-h-screen border-r border-[#201f1f] relative pb-20 lg:pb-8 select-none">
+      {/* Top sticky bar */}
+      <header className="sticky top-0 z-20 bg-black/85 backdrop-blur-md border-b border-[#201f1f] flex items-center gap-6 px-4 h-14">
+        <button
+          onClick={onBackToFeed}
+          className="p-2 -ml-2 text-[#89919d] hover:text-white rounded-full hover:bg-[#18181b] transition-colors"
+        >
+          <ArrowLeft className="w-5 h-5" />
+        </button>
+        <div>
+          <div className="flex items-center gap-1.5">
+            <h1 className="text-base font-bold text-[#e5e2e1] leading-tight">
+              {profile?.display_name || profile?.username}
+            </h1>
+            {profile?.verified && (
+              <CheckCircle2 className="w-3.5 h-3.5 text-[#1d9bf0] fill-[#1d9bf0]" />
+            )}
+          </div>
+          <p className="text-xs text-[#89919d] leading-none">
+            {userPosts.length} posts
+          </p>
+        </div>
+      </header>
+
+      {/* Banner */}
+      <div className="h-44 sm:h-52 w-full bg-gradient-to-br from-[#121212] via-[#1a1a24] to-[#0a0a0f] relative overflow-hidden border-b border-[#201f1f]">
+        <div className="absolute inset-0 opacity-20 bg-[radial-gradient(#38bdf8_1px,transparent_1px)] [background-size:16px_16px]" />
+      </div>
+
+      {/* Profile Info Header */}
+      <div className="px-4 pb-4">
+        {/* Avatar & Action Button Row */}
+        <div className="flex justify-between items-end -mt-16 sm:-mt-20 mb-4">
+          <div className="relative">
+            <img
+              src={profile?.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80'}
+              alt="Profile avatar"
+              className="w-28 h-28 sm:w-36 sm:h-36 rounded-full object-cover border-4 border-black bg-black"
+            />
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                setDisplayName(profile?.display_name || '');
+                setBio(profile?.bio || '');
+                setLocation(profile?.location || '');
+                setWebsite(profile?.website || '');
+                setAvatarUrl(profile?.avatar_url || '');
+                setIsEditing(true);
+              }}
+              className="px-4 py-2 border border-[#3f3f46] hover:border-white text-[#e5e2e1] hover:text-white rounded-full font-bold text-sm transition-all active:scale-95 flex items-center gap-1.5 cursor-pointer"
+            >
+              <Edit2 className="w-3.5 h-3.5" />
+              Edit Profile
+            </button>
+            <button
+              onClick={signOut}
+              title="Logout"
+              className="p-2 border border-[#3f3f46] hover:border-red-500 text-[#89919d] hover:text-red-400 rounded-full transition-colors"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+
+        {/* Name and Handle */}
+        <div className="mb-3">
+          <div className="flex items-center gap-1.5">
+            <h2 className="text-xl sm:text-2xl font-bold text-[#e5e2e1]">
+              {profile?.display_name || profile?.username}
+            </h2>
+            {profile?.verified && (
+              <CheckCircle2 className="w-5 h-5 text-[#1d9bf0] fill-[#1d9bf0]" />
+            )}
+          </div>
+          <p className="text-sm text-[#89919d]">@{profile?.username}</p>
+        </div>
+
+        {/* Bio */}
+        <p className="text-sm text-[#e5e2e1] leading-relaxed mb-4 whitespace-pre-wrap">
+          {profile?.bio || 'Building on Void. Synthesizing chaos into minimalist grids.'}
+        </p>
+
+        {/* Meta details (location, website, joined) */}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-[#89919d] mb-4">
+          <div className="flex items-center gap-1">
+            <MapPin className="w-4 h-4 text-[#89919d]" />
+            <span>{profile?.location || 'Neo-Tokyo'}</span>
+          </div>
+
+          <div className="flex items-center gap-1">
+            <LinkIcon className="w-4 h-4 text-[#89919d]" />
+            <a
+              href={profile?.website || '#'}
+              target="_blank"
+              rel="noreferrer"
+              className="text-[#1d9bf0] hover:underline"
+            >
+              {profile?.website?.replace(/^https?:\/\//, '') || 'arivera.dev'}
+            </a>
+          </div>
+
+          <div className="flex items-center gap-1">
+            <Calendar className="w-4 h-4 text-[#89919d]" />
+            <span>Joined March 2021</span>
+          </div>
+        </div>
+
+        {/* Following / Followers count */}
+        <div className="flex gap-5 text-sm">
+          <div className="cursor-pointer hover:underline">
+            <span className="font-bold text-[#e5e2e1]">342</span>{' '}
+            <span className="text-[#89919d]">Following</span>
+          </div>
+          <div className="cursor-pointer hover:underline">
+            <span className="font-bold text-[#e5e2e1]">1.2K</span>{' '}
+            <span className="text-[#89919d]">Followers</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Profile Sub Tabs */}
+      <div className="flex border-b border-[#201f1f] text-sm font-semibold text-[#89919d] overflow-x-auto scrollbar-none">
+        {(['posts', 'replies', 'highlights', 'media', 'likes'] as const).map((t) => (
+          <button
+            key={t}
+            onClick={() => setActiveSubTab(t)}
+            className={`flex-1 min-w-[70px] py-3.5 text-center capitalize transition-colors relative hover:bg-[#121212] cursor-pointer ${
+              activeSubTab === t ? 'text-[#e5e2e1] font-bold' : 'hover:text-[#e5e2e1]'
+            }`}
+          >
+            {t}
+            {activeSubTab === t && (
+              <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-12 h-1 rounded-full bg-[#1d9bf0]" />
+            )}
+          </button>
+        ))}
+      </div>
+
+      {/* User's Posts list */}
+      <div className="divide-y divide-[#201f1f]">
+        {userPosts.length === 0 ? (
+          <div className="p-12 text-center text-[#89919d]">
+            <p className="text-sm font-semibold text-[#e5e2e1] mb-1">No posts found</p>
+            <p className="text-xs">Posts you publish will appear here on your profile feed.</p>
+          </div>
+        ) : (
+          userPosts.map((post) => (
+            <article key={post.id} className="p-4 hover:bg-[#080808] transition-colors flex gap-3">
+              <img
+                src={profile?.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80'}
+                alt={profile?.username}
+                className="w-10 h-10 rounded-full object-cover shrink-0 border border-[#27272a]"
+              />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1.5 mb-1">
+                  <span className="font-bold text-sm text-[#e5e2e1]">
+                    {profile?.display_name || profile?.username}
+                  </span>
+                  {profile?.verified && (
+                    <CheckCircle2 className="w-3.5 h-3.5 text-[#1d9bf0] fill-[#1d9bf0]" />
+                  )}
+                  <span className="text-xs text-[#89919d]">@{profile?.username}</span>
+                  <span className="text-[#89919d]">·</span>
+                  <span className="text-xs text-[#89919d]">2h</span>
+                </div>
+
+                <p className="text-sm text-[#e5e2e1] leading-relaxed mb-3">{post.content}</p>
+
+                {post.image_url && (
+                  <div className="rounded-2xl border border-[#201f1f] overflow-hidden mb-3 max-h-72">
+                    <img src={post.image_url} alt="Media" className="w-full h-full object-cover" />
+                  </div>
+                )}
+
+                <div className="flex justify-between text-[#89919d] max-w-[425px]">
+                  <div className="flex items-center gap-1 text-xs">
+                    <MessageCircle className="w-4 h-4" /> {post.replies_count || 12}
+                  </div>
+                  <div className="flex items-center gap-1 text-xs">
+                    <Repeat2 className="w-4 h-4" /> {post.reposts_count || 4}
+                  </div>
+                  <div className="flex items-center gap-1 text-xs text-pink-500">
+                    <Heart className="w-4 h-4 fill-pink-500" /> {post.likes_count || 148}
+                  </div>
+                  <div className="flex items-center gap-1 text-xs">
+                    <BarChart3 className="w-4 h-4" /> {post.views_count || '1.2K'}
+                  </div>
+                  <Bookmark className="w-4 h-4" />
+                </div>
+              </div>
+            </article>
+          ))
+        )}
+      </div>
+
+      {/* Edit Profile Modal */}
+      {isEditing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <div className="bg-[#121212] border border-[#27272a] rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden">
+            <div className="p-4 border-b border-[#201f1f] flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setIsEditing(false)}
+                  className="p-1.5 hover:bg-[#201f1f] rounded-full text-[#89919d] hover:text-white"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+                <h3 className="font-bold text-base text-[#e5e2e1]">Edit profile</h3>
+              </div>
+              <button
+                onClick={handleSaveProfile}
+                className="px-4 py-1.5 bg-[#e5e2e1] text-black hover:bg-white font-bold text-xs rounded-full transition-all"
+              >
+                Save
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveProfile} className="p-5 space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-[#89919d] mb-1">Display Name</label>
+                <input
+                  type="text"
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  className="w-full bg-[#18181b] border border-[#27272a] rounded-xl px-3 py-2 text-sm text-[#e5e2e1] outline-none focus:border-[#1d9bf0]"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-[#89919d] mb-1">Bio</label>
+                <textarea
+                  rows={3}
+                  value={bio}
+                  onChange={(e) => setBio(e.target.value)}
+                  className="w-full bg-[#18181b] border border-[#27272a] rounded-xl px-3 py-2 text-sm text-[#e5e2e1] outline-none focus:border-[#1d9bf0] resize-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-[#89919d] mb-1">Location</label>
+                <input
+                  type="text"
+                  value={location}
+                  onChange={(e) => setLocation(e.target.value)}
+                  className="w-full bg-[#18181b] border border-[#27272a] rounded-xl px-3 py-2 text-sm text-[#e5e2e1] outline-none focus:border-[#1d9bf0]"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-[#89919d] mb-1">Website</label>
+                <input
+                  type="url"
+                  value={website}
+                  onChange={(e) => setWebsite(e.target.value)}
+                  className="w-full bg-[#18181b] border border-[#27272a] rounded-xl px-3 py-2 text-sm text-[#e5e2e1] outline-none focus:border-[#1d9bf0]"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-[#89919d] mb-1">Avatar Image URL</label>
+                <input
+                  type="url"
+                  value={avatarUrl}
+                  onChange={(e) => setAvatarUrl(e.target.value)}
+                  className="w-full bg-[#18181b] border border-[#27272a] rounded-xl px-3 py-2 text-sm text-[#e5e2e1] outline-none focus:border-[#1d9bf0]"
+                />
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </main>
+  );
+};
