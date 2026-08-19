@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { FollowProvider } from './context/FollowContext';
+import { supabase, isSupabaseConfigured } from './lib/supabase';
 import { ActiveTab, Post } from './types';
 import { INITIAL_POSTS } from './data/mockData';
 import { DesktopSidebar } from './components/Navigation/DesktopSidebar';
@@ -26,15 +27,73 @@ const MainApp: React.FC = () => {
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Unread badge indicators
-  const [unreadMessages, setUnreadMessages] = useState(1);
-  const [unreadNotifications, setUnreadNotifications] = useState(2);
+  // Unread badge indicators (red dot & counts)
+  const [hasUnreadMessages, setHasUnreadMessages] = useState(false);
+  const [hasUnreadNotifications, setHasUnreadNotifications] = useState(false);
+  const [unreadMessages, setUnreadMessages] = useState(0);
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
 
   // Clear badges when visiting respective tabs
   useEffect(() => {
-    if (activeTab === 'messages') setUnreadMessages(0);
-    if (activeTab === 'notifications') setUnreadNotifications(0);
+    if (activeTab === 'messages') {
+      setHasUnreadMessages(false);
+      setUnreadMessages(0);
+    }
+    if (activeTab === 'notifications') {
+      setHasUnreadNotifications(false);
+      setUnreadNotifications(0);
+    }
   }, [activeTab]);
+
+  // Realtime subscription for incoming direct messages and notifications
+  useEffect(() => {
+    if (!profile?.id || !isSupabaseConfigured) return;
+
+    // 1. Listen for new direct messages targeting current user
+    const messagesChannel = supabase
+      .channel(`unread_msgs_${profile.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages',
+          filter: `receiver_id=eq.${profile.id}`,
+        },
+        () => {
+          if (activeTab !== 'messages') {
+            setHasUnreadMessages(true);
+            setUnreadMessages((prev) => prev + 1);
+          }
+        }
+      )
+      .subscribe();
+
+    // 2. Listen for new notifications targeting current user
+    const notifsChannel = supabase
+      .channel(`unread_notifs_${profile.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'notifications',
+          filter: `user_id=eq.${profile.id}`,
+        },
+        () => {
+          if (activeTab !== 'notifications') {
+            setHasUnreadNotifications(true);
+            setUnreadNotifications((prev) => prev + 1);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(messagesChannel);
+      supabase.removeChannel(notifsChannel);
+    };
+  }, [profile?.id, activeTab]);
 
   if (loading) {
     return (
@@ -76,6 +135,8 @@ const MainApp: React.FC = () => {
           onOpenSettings={() => setIsSettingsModalOpen(true)}
           unreadMessagesCount={unreadMessages}
           unreadNotificationsCount={unreadNotifications}
+          hasUnreadMessages={hasUnreadMessages}
+          hasUnreadNotifications={hasUnreadNotifications}
         />
 
         {/* Center Main Content (Responsive Feed / Messages / Explore / Notifications / Profile) */}
@@ -113,13 +174,15 @@ const MainApp: React.FC = () => {
           )}
         </div>
 
-        {/* Mobile Bottom Fixed Navigation Bar: [Feed] [Messages] [+] [Notifications] [Profile] */}
+        {/* Mobile Bottom Fixed Navigation Bar */}
         <MobileBottomNav
           activeTab={activeTab}
           setActiveTab={setActiveTab}
           onOpenCompose={() => setIsComposeOpen(true)}
           unreadMessagesCount={unreadMessages}
           unreadNotificationsCount={unreadNotifications}
+          hasUnreadMessages={hasUnreadMessages}
+          hasUnreadNotifications={hasUnreadNotifications}
         />
 
         {/* Compose Post Modal */}
@@ -135,7 +198,7 @@ const MainApp: React.FC = () => {
           onClose={() => setIsSQLModalOpen(false)}
         />
 
-        {/* Settings & Credentials Modal */}
+        {/* Settings Modal */}
         <SettingsModal
           isOpen={isSettingsModalOpen}
           onClose={() => setIsSettingsModalOpen(false)}

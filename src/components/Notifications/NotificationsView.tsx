@@ -97,7 +97,7 @@ export const NotificationsView: React.FC = () => {
     : notifications;
 
   return (
-    <main className="w-full max-w-[600px] lg:ml-[275px] min-h-screen border-r border-[#201f1f] relative pb-20 lg:pb-8 select-none">
+    <main className="w-full max-w-[600px] shrink-0 min-h-screen border-r border-[#201f1f] relative pb-20 lg:pb-8 select-none">
       {/* Page Header */}
       <div className="sticky top-0 z-20 bg-black/85 backdrop-blur-md border-b border-[#201f1f]">
         <div className="px-4 py-3 flex justify-between items-center">

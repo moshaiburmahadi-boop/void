@@ -345,7 +345,7 @@ export const HomeFeed: React.FC<HomeFeedProps> = ({ posts, setPosts, onOpenCompo
       : posts;
 
   return (
-    <main className="w-full max-w-[600px] lg:ml-[275px] min-h-screen border-r border-[#201f1f] relative pb-20 lg:pb-8">
+    <main className="w-full max-w-[600px] shrink-0 min-h-screen border-r border-[#201f1f] relative pb-20 lg:pb-8">
       {/* Mobile Top Header */}
       <header className="docked full-width top-0 sticky z-30 border-b border-[#201f1f] flex justify-between items-center w-full px-4 max-w-[600px] mx-auto bg-black/85 backdrop-blur-md h-14 md:hidden">
         <span className="text-xl font-black tracking-tight text-[#e5e2e1]">Void</span>

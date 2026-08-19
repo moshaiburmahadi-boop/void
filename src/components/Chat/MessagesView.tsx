@@ -231,7 +231,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({ onUnreadChange }) =>
   );
 
   return (
-    <main className="w-full max-w-[990px] lg:ml-[275px] min-h-screen border-r border-[#201f1f] flex pb-20 lg:pb-0 select-none">
+    <main className="w-full max-w-[990px] min-h-screen border-r border-[#201f1f] flex pb-20 lg:pb-0 select-none">
       {/* Conversations Column */}
       <div
         className={`w-full md:w-[380px] border-r border-[#201f1f] flex flex-col h-screen sticky top-0 bg-black ${

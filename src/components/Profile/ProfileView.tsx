@@ -53,7 +53,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ posts, onBackToFeed, o
   };
 
   return (
-    <main className="w-full max-w-[600px] lg:ml-[275px] min-h-screen border-r border-[#201f1f] relative pb-20 lg:pb-8 select-none">
+    <main className="w-full max-w-[600px] shrink-0 min-h-screen border-r border-[#201f1f] relative pb-20 lg:pb-8 select-none">
       {/* Top sticky bar */}
       <header className="sticky top-0 z-20 bg-black/85 backdrop-blur-md border-b border-[#201f1f] flex items-center gap-6 px-4 h-14">
         <button

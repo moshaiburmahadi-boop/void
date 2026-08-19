@@ -8,6 +8,8 @@ interface MobileBottomNavProps {
   onOpenCompose: () => void;
   unreadMessagesCount?: number;
   unreadNotificationsCount?: number;
+  hasUnreadMessages?: boolean;
+  hasUnreadNotifications?: boolean;
 }
 
 export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
@@ -16,7 +18,12 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
   onOpenCompose,
   unreadMessagesCount = 0,
   unreadNotificationsCount = 0,
+  hasUnreadMessages = false,
+  hasUnreadNotifications = false,
 }) => {
+  const showMessagesRedDot = hasUnreadMessages || unreadMessagesCount > 0;
+  const showNotificationsRedDot = hasUnreadNotifications || unreadNotificationsCount > 0;
+
   return (
     <nav
       id="mobile-bottom-navbar"
@@ -50,8 +57,8 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
               activeTab === 'messages' ? 'text-white stroke-[2.5px]' : 'text-[#89919d]'
             }`}
           />
-          {unreadMessagesCount > 0 && (
-            <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-[#1d9bf0] rounded-full ring-2 ring-black" />
+          {showMessagesRedDot && (
+            <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full ring-2 ring-black animate-pulse" />
           )}
         </div>
         <span className="sr-only">Messages</span>
@@ -83,8 +90,8 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
               activeTab === 'notifications' ? 'text-white stroke-[2.5px]' : 'text-[#89919d]'
             }`}
           />
-          {unreadNotificationsCount > 0 && (
-            <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-[#1d9bf0] rounded-full ring-2 ring-black" />
+          {showNotificationsRedDot && (
+            <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full ring-2 ring-black animate-pulse" />
           )}
         </div>
         <span className="sr-only">Notifications</span>

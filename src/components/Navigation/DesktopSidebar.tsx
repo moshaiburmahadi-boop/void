@@ -19,6 +19,8 @@ interface DesktopSidebarProps {
   onOpenSettings: () => void;
   unreadMessagesCount?: number;
   unreadNotificationsCount?: number;
+  hasUnreadMessages?: boolean;
+  hasUnreadNotifications?: boolean;
 }
 
 export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
@@ -28,25 +30,30 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
   onOpenSettings,
   unreadMessagesCount = 0,
   unreadNotificationsCount = 0,
+  hasUnreadMessages = false,
+  hasUnreadNotifications = false,
 }) => {
   const { profile, signOut } = useAuth();
 
+  const showMessagesRedDot = hasUnreadMessages || unreadMessagesCount > 0;
+  const showNotificationsRedDot = hasUnreadNotifications || unreadNotificationsCount > 0;
+
   return (
-    <nav className="fixed left-0 top-0 h-screen w-[275px] hidden lg:flex flex-col border-r border-[#201f1f] bg-[#000000] py-5 px-4 z-40 select-none">
-      {/* Brand Header */}
-      <div className="mb-4 pl-3 flex items-center justify-between">
+    <nav className="hidden lg:flex flex-col justify-between w-[275px] shrink-0 h-screen px-3 py-4 sticky top-0 border-r border-[#201f1f] bg-black select-none z-30">
+      {/* Top Logo and Navigation Links */}
+      <div className="flex flex-col gap-1 w-full">
+        {/* Brand Logo */}
         <div
           onClick={() => setActiveTab('feed')}
-          className="cursor-pointer flex items-center gap-2 group"
+          className="flex items-center gap-3 p-3 text-[#e5e2e1] hover:bg-[#18181b] rounded-full w-fit cursor-pointer transition-colors"
         >
-          <span className="text-3xl font-black tracking-tight text-[#e5e2e1] group-hover:text-white transition-colors">
-            Void
-          </span>
+          <div className="w-9 h-9 bg-white text-black rounded-full flex items-center justify-center font-black text-xl tracking-tighter shadow-md">
+            V
+          </div>
+          <span className="text-xl font-black tracking-tight">Void</span>
         </div>
-      </div>
 
-      {/* Nav List */}
-      <div className="flex flex-col gap-1.5 flex-grow">
+        {/* Navigation Items */}
         <button
           onClick={() => setActiveTab('feed')}
           className={`flex items-center gap-4 py-3 px-4 rounded-full transition-all text-left cursor-pointer active:scale-98 ${
@@ -82,8 +89,8 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
           <div className="flex items-center gap-4">
             <div className="relative">
               <Bell className={`w-7 h-7 ${activeTab === 'notifications' ? 'stroke-[2.5px] text-white' : ''}`} />
-              {unreadNotificationsCount > 0 && (
-                <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-[#1d9bf0] rounded-full ring-2 ring-black" />
+              {showNotificationsRedDot && (
+                <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full ring-2 ring-black animate-pulse" />
               )}
             </div>
             <span className="text-lg">Notifications</span>
@@ -101,8 +108,8 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
           <div className="flex items-center gap-4">
             <div className="relative">
               <Mail className={`w-7 h-7 ${activeTab === 'messages' ? 'stroke-[2.5px] text-white' : ''}`} />
-              {unreadMessagesCount > 0 && (
-                <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-[#1d9bf0] rounded-full ring-2 ring-black" />
+              {showMessagesRedDot && (
+                <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full ring-2 ring-black animate-pulse" />
               )}
             </div>
             <span className="text-lg">Messages</span>
@@ -125,7 +132,7 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
         <button
           id="btn-sidebar-post"
           onClick={onOpenCompose}
-          className="mt-4 bg-[#e5e2e1] hover:bg-white text-[#000000] font-bold text-base rounded-full py-3.5 w-full transition-all shadow-lg active:scale-98 cursor-pointer flex items-center justify-center gap-2"
+          className="mt-4 bg-[#eff3f4] hover:bg-white text-black font-bold text-base rounded-full py-3.5 w-full transition-all shadow-lg active:scale-98 cursor-pointer flex items-center justify-center gap-2"
         >
           Post
         </button>
