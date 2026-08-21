@@ -45,11 +45,14 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
         {/* Brand Logo */}
         <div
           onClick={() => setActiveTab('feed')}
-          className="flex items-center gap-3 p-3 text-[#e5e2e1] hover:bg-[#18181b] rounded-full w-fit cursor-pointer transition-colors"
+          className="flex items-center gap-3 p-2 text-[#e5e2e1] hover:bg-[#18181b] rounded-full w-fit cursor-pointer transition-colors"
         >
-          <div className="w-9 h-9 bg-white text-black rounded-full flex items-center justify-center font-black text-xl tracking-tighter shadow-md">
-            V
-          </div>
+          <img
+            src="/logo.png"
+            alt="Void"
+            className="w-9 h-9 rounded-full object-cover shadow-md border border-neutral-800"
+            referrerPolicy="no-referrer"
+          />
           <span className="text-xl font-black tracking-tight">Void</span>
         </div>
 

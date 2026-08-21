@@ -1,7 +1,8 @@
 {
   "id": "/",
   "short_name": "Void",
-  "name": "Void",
+  "name": "Void - Next-Gen Social & Realtime Chat",
+  "description": "Void - Next-Gen Social Feed & Realtime Chat",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
@@ -10,15 +11,39 @@
   "theme_color": "#000000",
   "icons": [
     {
-      "src": "/favicon.png",
+      "src": "/icon-192.png",
       "type": "image/png",
       "sizes": "192x192",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/logo.png",
+      "type": "image/png",
+      "sizes": "512x512",
       "purpose": "any maskable"
     },
     {
       "src": "/favicon.png",
       "type": "image/png",
-      "sizes": "512x512",
+      "sizes": "192x192",
       "purpose": "any maskable"
     }
   ]
