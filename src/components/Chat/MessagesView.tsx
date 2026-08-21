@@ -718,10 +718,13 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                       {/* Swipeable container */}
                       <motion.div
                         drag="x"
-                        dragConstraints={{ left: 0, right: 80 }}
-                        dragElastic={0.2}
+                        dragSnapToOrigin={true}
+                        dragConstraints={isMe ? { left: -70, right: 0 } : { left: 0, right: 70 }}
+                        dragElastic={0.4}
                         onDragEnd={(_, info) => {
-                          if (info.offset.x > 50) {
+                          if (isMe && (info.offset.x < -35 || info.velocity.x < -150)) {
+                            handleInitiateReply(msg);
+                          } else if (!isMe && (info.offset.x > 35 || info.velocity.x > 150)) {
                             handleInitiateReply(msg);
                           }
                         }}
@@ -729,9 +732,13 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                           isMe ? 'flex-row-reverse' : 'flex-row'
                         }`}
                       >
-                        {/* Swipe Reply Icon Indicator (revealed on drag right) */}
-                        <div className="absolute -left-7 top-1/2 -translate-y-1/2 text-[#1d9bf0] opacity-70 pointer-events-none sm:hidden">
-                          <Reply className="w-4 h-4" />
+                        {/* Swipe Reply Icon Indicator (revealed on drag) */}
+                        <div
+                          className={`absolute ${
+                            isMe ? '-right-6' : '-left-6'
+                          } top-1/2 -translate-y-1/2 text-[#1d9bf0] opacity-70 pointer-events-none`}
+                        >
+                          <Reply className={`w-4 h-4 ${isMe ? 'scale-x-[-1]' : ''}`} />
                         </div>
 
                         {/* Message Bubble Container */}
