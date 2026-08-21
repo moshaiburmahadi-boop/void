@@ -5,18 +5,11 @@ import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { Post, Profile } from '../../types';
 import { INITIAL_POSTS } from '../../data/mockData';
 import { MobileSearchModal } from '../Search/MobileSearchModal';
+import { PostItem } from './PostItem';
 import {
-  MessageCircle,
-  Repeat2,
-  Heart,
-  BarChart3,
-  Bookmark,
-  CheckCircle2,
   Image as ImageIcon,
   Smile,
   Sparkles,
-  Loader2,
-  Trash2,
   RotateCw,
   Search,
   Users,
@@ -84,7 +77,7 @@ export const HomeFeed: React.FC<HomeFeedProps> = ({
           user_has_liked: userLikes.has(p.id),
           replies_count: 0,
           reposts_count: 0,
-          views_count: '0',
+          views_count: 1,
         }));
         setPosts(formattedPosts);
       }
@@ -113,42 +106,27 @@ export const HomeFeed: React.FC<HomeFeedProps> = ({
           table: 'posts',
         },
         async (payload) => {
-          const newPost = payload.new as any;
-          let authorProfile = null;
-          try {
-            const { data } = await supabase
-              .from('profiles')
-              .select('*')
-              .eq('id', newPost.user_id)
-              .single();
-            authorProfile = data;
-          } catch (e) {
-            console.warn(e);
-          }
+          const newPost = payload.new as Post;
+          // Fetch author details for the newly inserted post
+          const { data: authorData } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', newPost.user_id)
+            .single();
+
+          const postWithAuthor: Post = {
+            ...newPost,
+            profiles: authorData || undefined,
+            likes_count: 0,
+            user_has_liked: false,
+            replies_count: 0,
+            reposts_count: 0,
+            views_count: 1,
+          };
 
           setPosts((prev) => {
-            if (prev.some((p) => p.id === newPost.id)) {
-              return prev;
-            }
-            const postObj: Post = {
-              id: newPost.id,
-              user_id: newPost.user_id,
-              content: newPost.content,
-              image_url: newPost.image_url,
-              created_at: newPost.created_at || new Date().toISOString(),
-              profiles: authorProfile || {
-                username: 'member',
-                display_name: 'Void Member',
-                avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80',
-                verified: false,
-              },
-              likes_count: 0,
-              replies_count: 0,
-              reposts_count: 0,
-              views_count: '1',
-              user_has_liked: false,
-            };
-            return [postObj, ...prev];
+            if (prev.some((p) => p.id === postWithAuthor.id)) return prev;
+            return [postWithAuthor, ...prev];
           });
         }
       )
@@ -160,8 +138,10 @@ export const HomeFeed: React.FC<HomeFeedProps> = ({
           table: 'posts',
         },
         (payload) => {
-          const deletedId = (payload.old as any).id;
-          setPosts((prev) => prev.filter((p) => p.id !== deletedId));
+          const deletedId = (payload.old as { id: string })?.id;
+          if (deletedId) {
+            setPosts((prev) => prev.filter((p) => p.id !== deletedId));
+          }
         }
       )
       .subscribe();
@@ -171,125 +151,35 @@ export const HomeFeed: React.FC<HomeFeedProps> = ({
     };
   }, []);
 
-  // Handle post deletion
-  const handleDeletePost = async (postId: string) => {
-    if (!profile) return;
-    setPosts((prev) => prev.filter((p) => p.id !== postId));
-
-    if (isSupabaseConfigured) {
-      try {
-        await supabase.from('posts').delete().eq('id', postId);
-      } catch (err) {
-        console.warn('Failed to delete post from Supabase:', err);
-      }
-    }
-  };
-
-  // Handle like toggle
-  const handleToggleLike = async (postId: string) => {
-    if (!profile) return;
-
-    let isLikedNow = false;
-    let targetPost: Post | undefined;
-
-    setPosts((prev) =>
-      prev.map((p) => {
-        if (p.id === postId) {
-          targetPost = p;
-          isLikedNow = !p.user_has_liked;
-          return {
-            ...p,
-            user_has_liked: isLikedNow,
-            likes_count: (p.likes_count || 0) + (isLikedNow ? 1 : -1),
-          };
-        }
-        return p;
-      })
-    );
-
-    if (isSupabaseConfigured && targetPost) {
-      try {
-        const target = targetPost as Post;
-        if (isLikedNow) {
-          await supabase.from('likes').insert({
-            post_id: postId,
-            user_id: profile.id,
-            created_at: new Date().toISOString(),
-          });
-
-          // Also trigger notification for post author
-          if (target.user_id !== profile.id) {
-            await supabase.from('notifications').insert({
-              user_id: target.user_id,
-              actor_id: profile.id,
-              type: 'like',
-              post_id: postId,
-            });
-          }
-        } else {
-          await supabase
-            .from('likes')
-            .delete()
-            .match({ post_id: postId, user_id: profile.id });
-        }
-      } catch (err) {
-        console.warn('Like toggle sync error:', err);
-      }
-    }
-  };
-
-  // Handle repost toggle
-  const handleToggleRepost = async (postId: string) => {
-    if (!profile) return;
-
-    setPosts((prev) =>
-      prev.map((p) => {
-        if (p.id === postId) {
-          const next = !p.user_has_reposted;
-          return {
-            ...p,
-            user_has_reposted: next,
-            reposts_count: (p.reposts_count || 0) + (next ? 1 : -1),
-          };
-        }
-        return p;
-      })
-    );
-  };
-
-  // Handle bookmark toggle
-  const handleToggleBookmark = (postId: string) => {
-    setPosts((prev) =>
-      prev.map((p) => {
-        if (p.id === postId) {
-          return {
-            ...p,
-            user_has_bookmarked: !p.user_has_bookmarked,
-          };
-        }
-        return p;
-      })
-    );
-  };
-
-  // Handle inline compose
   const handleInlineCompose = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!composeText.trim() || !profile || isSubmitting) return;
+    if (!composeText.trim() || isSubmitting) return;
 
     setIsSubmitting(true);
-    const content = composeText.trim();
-    const image = composeImage.trim() || null;
 
-    if (isSupabaseConfigured) {
+    const newPostItem: Post = {
+      id: `local-${Date.now()}`,
+      user_id: profile?.id || 'demo-user',
+      content: composeText.trim(),
+      image_url: composeImage.trim() || undefined,
+      created_at: new Date().toISOString(),
+      profiles: profile || undefined,
+      likes_count: 0,
+      user_has_liked: false,
+      replies_count: 0,
+      reposts_count: 0,
+      views_count: 1,
+      user_has_bookmarked: false,
+    };
+
+    if (isSupabaseConfigured && profile?.id) {
       try {
         const { data, error } = await supabase
           .from('posts')
           .insert({
             user_id: profile.id,
-            content,
-            image_url: image,
-            created_at: new Date().toISOString(),
+            content: composeText.trim(),
+            image_url: composeImage.trim() || null,
           })
           .select(`
             id,
@@ -301,40 +191,30 @@ export const HomeFeed: React.FC<HomeFeedProps> = ({
           `)
           .single();
 
-        if (!error && data) {
-          const newP: Post = {
-            id: data.id,
-            user_id: data.user_id,
-            content: data.content,
-            image_url: data.image_url,
-            created_at: data.created_at,
-            profiles: Array.isArray(data.profiles) ? data.profiles[0] : data.profiles || profile,
+        if (error) {
+          console.error('Supabase post insert failed, using local:', error);
+          setPosts((prev) => [newPostItem, ...prev]);
+        } else if (data) {
+          const insertedPost: Post = {
+            ...data,
+            profiles: Array.isArray(data.profiles) ? data.profiles[0] : data.profiles,
             likes_count: 0,
+            user_has_liked: false,
             replies_count: 0,
             reposts_count: 0,
-            views_count: '1',
-            user_has_liked: false,
+            views_count: 1,
           };
-          setPosts((prev) => [newP, ...prev.filter((p) => p.id !== newP.id)]);
+          setPosts((prev) => {
+            const filtered = prev.filter((p) => p.id !== insertedPost.id);
+            return [insertedPost, ...filtered];
+          });
         }
       } catch (err) {
-        console.warn('Inline compose fallback:', err);
+        console.error('Post creation error:', err);
+        setPosts((prev) => [newPostItem, ...prev]);
       }
     } else {
-      const mockP: Post = {
-        id: `post_${Date.now()}`,
-        user_id: profile.id,
-        content,
-        image_url: image || undefined,
-        created_at: new Date().toISOString(),
-        profiles: profile,
-        likes_count: 0,
-        replies_count: 0,
-        reposts_count: 0,
-        views_count: '1',
-        user_has_liked: false,
-      };
-      setPosts((prev) => [mockP, ...prev]);
+      setPosts((prev) => [newPostItem, ...prev]);
     }
 
     setComposeText('');
@@ -343,41 +223,54 @@ export const HomeFeed: React.FC<HomeFeedProps> = ({
     setIsSubmitting(false);
   };
 
-  const formatRelativeTime = (timestamp?: string) => {
-    if (!timestamp) return 'now';
-    try {
-      const now = new Date();
-      const postDate = new Date(timestamp);
-      const diffMs = now.getTime() - postDate.getTime();
-      const mins = Math.floor(diffMs / 60000);
-      if (mins < 1) return 'now';
-      if (mins < 60) return `${mins}m`;
-      const hours = Math.floor(mins / 60);
-      if (hours < 24) return `${hours}h`;
-      const days = Math.floor(hours / 24);
-      return `${days}d`;
-    } catch {
-      return '2h';
+  const handleDeletePost = async (postId: string) => {
+    setPosts((prev) => prev.filter((p) => p.id !== postId));
+    if (isSupabaseConfigured) {
+      try {
+        await supabase.from('posts').delete().eq('id', postId);
+      } catch (err) {
+        console.error('Delete post error:', err);
+      }
     }
   };
 
-  // Filter based on tab:
-  // 'for_you' shows all posts from all users
-  // 'following' shows ONLY posts authored by followed users (ordered by created_at desc)
-  const displayedPosts =
-    feedTab === 'following'
-      ? posts.filter((p) => isFollowing(p.user_id))
-      : posts;
+  const handlePostUpdated = (updatedPost: Post) => {
+    setPosts((prev) => prev.map((p) => (p.id === updatedPost.id ? updatedPost : p)));
+  };
+
+  // Filter posts based on active tab
+  const displayedPosts = posts.filter((post) => {
+    if (feedTab === 'for_you') return true;
+    if (feedTab === 'following') {
+      return post.user_id ? isFollowing(post.user_id) : false;
+    }
+    return true;
+  });
 
   return (
-    <main className="w-full max-w-[600px] shrink-0 min-h-screen border-r border-[#201f1f] relative pb-20 lg:pb-8">
+    <main className="w-full max-w-[600px] shrink-0 min-h-screen border-r border-[#201f1f] relative pb-20 lg:pb-8 select-none">
       {/* Mobile Top Header */}
-      <header className="docked full-width top-0 sticky z-30 border-b border-[#201f1f] flex justify-between items-center w-full px-4 max-w-[600px] mx-auto bg-black/85 backdrop-blur-md h-14 md:hidden">
-        <span className="text-xl font-black tracking-tight text-[#e5e2e1]">Void</span>
+      <header className="sticky top-0 z-30 bg-black/85 backdrop-blur-md border-b border-[#201f1f] flex md:hidden items-center justify-between px-4 h-14">
+        <div className="flex items-center gap-3">
+          <img
+            src={profile?.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80'}
+            alt={profile?.username || 'avatar'}
+            onClick={() => {
+              if (onViewProfile && profile) {
+                onViewProfile(profile);
+              }
+            }}
+            className="w-8 h-8 rounded-full object-cover border border-[#27272a] cursor-pointer"
+          />
+          <div className="flex items-center gap-1.5">
+            <h1 className="text-base font-extrabold tracking-tight text-[#e5e2e1]">Home</h1>
+          </div>
+        </div>
+
         <div className="flex items-center gap-1">
           <button
             onClick={() => setIsMobileSearchOpen(true)}
-            className="text-[#89919d] hover:text-white p-2 rounded-full hover:bg-white/10 transition-colors md:hidden"
+            className="text-[#89919d] hover:text-white p-2 rounded-full hover:bg-white/10 transition-colors md:hidden cursor-pointer"
             title="Search Void"
             aria-label="Search Void"
           >
@@ -385,7 +278,7 @@ export const HomeFeed: React.FC<HomeFeedProps> = ({
           </button>
           <button
             onClick={fetchPosts}
-            className="text-[#89919d] hover:text-white p-2 rounded-full hover:bg-white/10 transition-colors"
+            className="text-[#89919d] hover:text-white p-2 rounded-full hover:bg-white/10 transition-colors cursor-pointer"
             title="Refresh Feed"
             aria-label="Refresh Feed"
           >
@@ -444,7 +337,7 @@ export const HomeFeed: React.FC<HomeFeedProps> = ({
               <button
                 type="button"
                 onClick={() => setComposeImage('')}
-                className="absolute top-2 right-2 p-1.5 bg-black/70 hover:bg-black text-white rounded-full text-xs"
+                className="absolute top-2 right-2 p-1.5 bg-black/70 hover:bg-black text-white rounded-full text-xs cursor-pointer"
               >
                 ✕
               </button>
@@ -468,7 +361,7 @@ export const HomeFeed: React.FC<HomeFeedProps> = ({
               <button
                 type="button"
                 onClick={() => setShowImageInput((prev) => !prev)}
-                className="p-2 rounded-full hover:bg-[#1d9bf0]/10 transition-colors"
+                className="p-2 rounded-full hover:bg-[#1d9bf0]/10 transition-colors cursor-pointer"
                 title="Add Image"
               >
                 <ImageIcon className="w-4 h-4" />
@@ -476,7 +369,7 @@ export const HomeFeed: React.FC<HomeFeedProps> = ({
               <button
                 type="button"
                 onClick={() => setComposeText((prev) => prev + ' 🚀')}
-                className="p-2 rounded-full hover:bg-[#1d9bf0]/10 transition-colors"
+                className="p-2 rounded-full hover:bg-[#1d9bf0]/10 transition-colors cursor-pointer"
                 title="Emoji"
               >
                 <Smile className="w-4 h-4" />
@@ -484,7 +377,7 @@ export const HomeFeed: React.FC<HomeFeedProps> = ({
               <button
                 type="button"
                 onClick={() => setComposeText((prev) => prev + ' #Glassmorphism')}
-                className="p-2 rounded-full hover:bg-[#1d9bf0]/10 transition-colors"
+                className="p-2 rounded-full hover:bg-[#1d9bf0]/10 transition-colors cursor-pointer"
                 title="Hashtag"
               >
                 <Sparkles className="w-4 h-4" />
@@ -506,7 +399,7 @@ export const HomeFeed: React.FC<HomeFeedProps> = ({
         </form>
       </div>
 
-      {/* Feed Posts List */}
+      {/* Feed Posts List (Using shared PostItem component) */}
       <div className="divide-y divide-[#201f1f]">
         {displayedPosts.length === 0 ? (
           feedTab === 'following' ? (
@@ -525,184 +418,22 @@ export const HomeFeed: React.FC<HomeFeedProps> = ({
               <p className="text-xs mb-4">Be the first to share an update on Void!</p>
               <button
                 onClick={onOpenCompose}
-                className="px-5 py-2 bg-[#1d9bf0] text-white text-xs font-bold rounded-full hover:bg-[#1a8cd8]"
+                className="px-5 py-2 bg-[#1d9bf0] text-white text-xs font-bold rounded-full hover:bg-[#1a8cd8] cursor-pointer"
               >
                 Create Post
               </button>
             </div>
           )
         ) : (
-          displayedPosts.map((post) => {
-            const author = post.profiles || {
-              username: 'user',
-              display_name: 'Void Member',
-              avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80',
-              verified: false,
-            };
-            const isAuthor = profile && (post.user_id === profile.id || author.username === profile.username);
-
-            return (
-              <article
-                key={post.id}
-                className="p-4 hover:bg-[#080808] transition-colors cursor-pointer flex gap-3 group"
-              >
-                {/* Author Avatar */}
-                <img
-                  src={author.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80'}
-                  alt={author.display_name || author.username}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (onViewProfile && post.profiles) {
-                      onViewProfile(post.profiles);
-                    }
-                  }}
-                  className="w-10 h-10 rounded-full object-cover shrink-0 border border-[#27272a] hover:opacity-80 transition-opacity cursor-pointer"
-                />
-
-                <div className="flex-1 min-w-0">
-                  {/* Author Header */}
-                  <div className="flex items-center justify-between gap-1 mb-1">
-                    <div
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (onViewProfile && post.profiles) {
-                          onViewProfile(post.profiles);
-                        }
-                      }}
-                      className="flex items-center gap-1.5 min-w-0 truncate cursor-pointer group/author"
-                    >
-                      <span className="font-bold text-sm text-[#e5e2e1] truncate group-hover/author:underline">
-                        {author.display_name || author.username}
-                      </span>
-                      {author.verified && (
-                        <CheckCircle2 className="w-3.5 h-3.5 text-[#1d9bf0] fill-[#1d9bf0] shrink-0" />
-                      )}
-                      <span className="text-xs text-[#89919d] truncate">
-                        @{author.username}
-                      </span>
-                      <span className="text-[#89919d]">·</span>
-                      <span className="text-xs text-[#89919d] hover:underline">
-                        {formatRelativeTime(post.created_at)}
-                      </span>
-                    </div>
-
-                    {isAuthor && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeletePost(post.id);
-                        }}
-                        className="opacity-0 group-hover:opacity-100 text-[#89919d] hover:text-red-400 p-1 rounded-full hover:bg-[#18181b] transition-all"
-                        title="Delete Post"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Post Content */}
-                  <p className="text-sm text-[#e5e2e1] leading-relaxed mb-3 break-words whitespace-pre-wrap">
-                    {post.content}
-                  </p>
-
-                  {/* Media Attachment */}
-                  {post.image_url && (
-                    <div className="rounded-2xl border border-[#201f1f] overflow-hidden mb-3 max-h-[340px] bg-[#0e0e0e]">
-                      <img
-                        src={post.image_url}
-                        alt="Post media"
-                        className="w-full h-full object-cover max-h-[340px]"
-                      />
-                    </div>
-                  )}
-
-                  {/* Action Bar */}
-                  <div className="flex justify-between text-[#89919d] max-w-[425px] pt-1">
-                    {/* Replies */}
-                    <button
-                      onClick={(e) => e.stopPropagation()}
-                      className="flex items-center gap-1.5 hover:text-[#1d9bf0] group/btn transition-colors"
-                    >
-                      <div className="p-2 rounded-full group-hover/btn:bg-[#1d9bf0]/10 transition-colors">
-                        <MessageCircle className="w-4 h-4" />
-                      </div>
-                      <span className="text-xs font-medium">
-                        {post.replies_count || 0}
-                      </span>
-                    </button>
-
-                    {/* Reposts */}
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleToggleRepost(post.id);
-                      }}
-                      className={`flex items-center gap-1.5 group/repost transition-colors ${
-                        post.user_has_reposted ? 'text-emerald-500' : 'hover:text-emerald-500'
-                      }`}
-                    >
-                      <div className="p-2 rounded-full group-hover/repost:bg-emerald-500/10 transition-colors">
-                        <Repeat2 className="w-4 h-4" />
-                      </div>
-                      <span className="text-xs font-medium">
-                        {post.reposts_count || 0}
-                      </span>
-                    </button>
-
-                    {/* Likes */}
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleToggleLike(post.id);
-                      }}
-                      className={`flex items-center gap-1.5 group/like transition-colors ${
-                        post.user_has_liked ? 'text-pink-500 font-bold' : 'hover:text-pink-500'
-                      }`}
-                    >
-                      <div className="p-2 rounded-full group-hover/like:bg-pink-500/10 transition-colors">
-                        <Heart
-                          className={`w-4 h-4 ${
-                            post.user_has_liked ? 'fill-pink-500 text-pink-500 scale-110' : ''
-                          } transition-transform`}
-                        />
-                      </div>
-                      <span className="text-xs font-medium">
-                        {post.likes_count || 0}
-                      </span>
-                    </button>
-
-                    {/* Views */}
-                    <button
-                      onClick={(e) => e.stopPropagation()}
-                      className="flex items-center gap-1.5 hover:text-[#1d9bf0] group/view transition-colors"
-                    >
-                      <div className="p-2 rounded-full group-hover/view:bg-[#1d9bf0]/10 transition-colors">
-                        <BarChart3 className="w-4 h-4" />
-                      </div>
-                      <span className="text-xs font-medium">
-                        {post.views_count || 0}
-                      </span>
-                    </button>
-
-                    {/* Bookmark */}
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleToggleBookmark(post.id);
-                      }}
-                      className={`p-2 rounded-full hover:bg-[#1d9bf0]/10 hover:text-[#1d9bf0] transition-colors ${
-                        post.user_has_bookmarked ? 'text-[#1d9bf0]' : ''
-                      }`}
-                    >
-                      <Bookmark
-                        className={`w-4 h-4 ${post.user_has_bookmarked ? 'fill-[#1d9bf0]' : ''}`}
-                      />
-                    </button>
-                  </div>
-                </div>
-              </article>
-            );
-          })
+          displayedPosts.map((post) => (
+            <PostItem
+              key={post.id}
+              post={post}
+              onDeletePost={handleDeletePost}
+              onViewProfile={onViewProfile}
+              onPostUpdated={handlePostUpdated}
+            />
+          ))
         )}
       </div>
 

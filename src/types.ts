@@ -8,6 +8,8 @@ export interface Profile {
   location?: string | null;
   created_at: string;
   verified?: boolean;
+  follower_count?: number;
+  following_count?: number;
 }
 
 export interface Post {
@@ -24,6 +26,21 @@ export interface Post {
   views_count?: string | number;
   user_has_reposted?: boolean;
   user_has_bookmarked?: boolean;
+}
+
+export interface Comment {
+  id: string;
+  post_id: string;
+  user_id: string;
+  content: string;
+  created_at: string;
+  profiles?: Profile | null;
+}
+
+export interface Follow {
+  follower_id: string;
+  following_id: string;
+  created_at: string;
 }
 
 export interface Like {

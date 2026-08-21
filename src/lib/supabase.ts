@@ -1,7 +1,7 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-export const DEFAULT_SUPABASE_URL = 'https://eiezcdtbqqicxsxsoxoy.supabase.co';
-export const DEFAULT_SUPABASE_ANON_KEY = 'sb_publishable_lM-qNesoPgquIa1r1p0X1g_m-Oo9q2Z';
+export const DEFAULT_SUPABASE_URL = 'https://oqqmwsfavylcyqtqtwfg.supabase.co';
+export const DEFAULT_SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9xcW13c2ZhdnlsY3lxdHF0d2ZnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODczMDUwMjcsImV4cCI6MjEwMjg4MTAyN30.s7Ki9HnhPukAZ2CqpFvFR3GjRqwhE6NKi2PqsHkmRmk';
 
 // Clean and normalize Supabase URL
 export function sanitizeSupabaseUrl(rawUrl?: string | null): string {
@@ -65,7 +65,7 @@ export const clearSupabaseCredentials = () => {
   window.location.reload();
 };
 
-export const SCHEMA_SQL = `-- VOID Database Schema (Supabase)
+export const SCHEMA_SQL = `-- VOID Complete Database Schema (Supabase)
 -- 1. Profiles Table (Linked to auth.users)
 CREATE TABLE IF NOT EXISTS public.profiles (
   id UUID REFERENCES auth.users(id) ON DELETE CASCADE PRIMARY KEY,
@@ -97,7 +97,30 @@ CREATE TABLE IF NOT EXISTS public.likes (
   UNIQUE(post_id, user_id)
 );
 
--- 4. Messages Table (Realtime Chat)
+-- 4. Comments Table
+CREATE TABLE IF NOT EXISTS public.comments (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  post_id UUID REFERENCES public.posts(id) ON DELETE CASCADE NOT NULL,
+  user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE NOT NULL,
+  content TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
+);
+
+-- 5. Follows Table (Strict Directional Follower/Following)
+CREATE TABLE IF NOT EXISTS public.follows (
+  follower_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE NOT NULL,
+  following_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
+  PRIMARY KEY (follower_id, following_id)
+);
+
+-- Indexes for performance
+CREATE INDEX IF NOT EXISTS idx_follows_follower ON public.follows(follower_id);
+CREATE INDEX IF NOT EXISTS idx_follows_following ON public.follows(following_id);
+CREATE INDEX IF NOT EXISTS idx_likes_post ON public.likes(post_id);
+CREATE INDEX IF NOT EXISTS idx_comments_post ON public.comments(post_id);
+
+-- 6. Messages Table (Realtime Chat)
 CREATE TABLE IF NOT EXISTS public.messages (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   sender_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE NOT NULL,
@@ -106,7 +129,7 @@ CREATE TABLE IF NOT EXISTS public.messages (
   created_at TIMESTAMPTZ DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
 );
 
--- 5. Notifications Table
+-- 7. Notifications Table
 CREATE TABLE IF NOT EXISTS public.notifications (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE NOT NULL,
@@ -120,6 +143,8 @@ CREATE TABLE IF NOT EXISTS public.notifications (
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.posts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.likes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.comments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.follows ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
 
@@ -135,6 +160,14 @@ CREATE POLICY "Users can delete their own posts." ON public.posts FOR DELETE USI
 CREATE POLICY "Likes are viewable by everyone." ON public.likes FOR SELECT USING (true);
 CREATE POLICY "Authenticated users can like posts." ON public.likes FOR INSERT WITH CHECK (auth.uid() = user_id);
 CREATE POLICY "Users can unlike posts." ON public.likes FOR DELETE USING (auth.uid() = user_id);
+
+CREATE POLICY "Comments are viewable by everyone." ON public.comments FOR SELECT USING (true);
+CREATE POLICY "Authenticated users can comment." ON public.comments FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can delete their own comments." ON public.comments FOR DELETE USING (auth.uid() = user_id);
+
+CREATE POLICY "Follows are viewable by everyone." ON public.follows FOR SELECT USING (true);
+CREATE POLICY "Authenticated users can follow." ON public.follows FOR INSERT WITH CHECK (auth.uid() = follower_id);
+CREATE POLICY "Users can unfollow." ON public.follows FOR DELETE USING (auth.uid() = follower_id);
 
 CREATE POLICY "Users can view their messages." ON public.messages FOR SELECT USING (auth.uid() = sender_id OR auth.uid() = receiver_id);
 CREATE POLICY "Users can send messages." ON public.messages FOR INSERT WITH CHECK (auth.uid() = sender_id);
@@ -168,5 +201,7 @@ CREATE TRIGGER on_auth_user_created
 ALTER PUBLICATION supabase_realtime ADD TABLE public.messages;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.posts;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.likes;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.comments;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.follows;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.notifications;
 `;

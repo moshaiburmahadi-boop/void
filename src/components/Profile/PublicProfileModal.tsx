@@ -3,6 +3,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useFollow } from '../../context/FollowContext';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { Post, Profile } from '../../types';
+import { PostItem } from '../Feed/PostItem';
 import {
   ArrowLeft,
   Calendar,
@@ -12,11 +13,6 @@ import {
   Mail,
   UserPlus,
   UserCheck,
-  Heart,
-  MessageCircle,
-  Repeat2,
-  BarChart3,
-  Bookmark,
   Loader2,
   X,
 } from 'lucide-react';
@@ -36,10 +32,17 @@ export const PublicProfileModal: React.FC<PublicProfileModalProps> = ({
   onStartMessage,
 }) => {
   const { profile: currentUser } = useAuth();
-  const { isFollowing, toggleFollow, getFollowerCount, getFollowingCount } = useFollow();
+  const { isFollowing, toggleFollow, getFollowerCount, getFollowingCount, fetchUserFollowStats } = useFollow();
   const [activeSubTab, setActiveSubTab] = useState<'posts' | 'replies' | 'media' | 'likes'>('posts');
   const [userPosts, setUserPosts] = useState<Post[]>([]);
   const [isLoadingPosts, setIsLoadingPosts] = useState(false);
+
+  // Sync follow counts from Supabase follows table for this user
+  useEffect(() => {
+    if (isOpen && user?.id) {
+      fetchUserFollowStats(user.id);
+    }
+  }, [isOpen, user?.id, fetchUserFollowStats]);
 
   // Fetch posts of this specific user
   useEffect(() => {
@@ -47,6 +50,8 @@ export const PublicProfileModal: React.FC<PublicProfileModalProps> = ({
       setUserPosts([]);
       return;
     }
+
+    let isMounted = true;
 
     const fetchTargetUserPosts = async () => {
       if (!isSupabaseConfigured) return;
@@ -65,112 +70,48 @@ export const PublicProfileModal: React.FC<PublicProfileModalProps> = ({
           .eq('user_id', user.id)
           .order('created_at', { ascending: false });
 
-        if (!error && data) {
-          // Fetch likes by current user
-          let userLikes = new Set<string>();
-          if (currentUser?.id) {
-            const { data: likesData } = await supabase
-              .from('likes')
-              .select('post_id')
-              .eq('user_id', currentUser.id);
-            if (likesData) {
-              userLikes = new Set(likesData.map((l) => l.post_id));
-            }
-          }
-
+        if (isMounted && !error && data) {
           const formatted: Post[] = (data as unknown as any[]).map((p) => ({
             ...p,
             profiles: Array.isArray(p.profiles) ? p.profiles[0] : p.profiles || user,
-            likes_count: userLikes.has(p.id) ? 1 : 0,
-            user_has_liked: userLikes.has(p.id),
+            likes_count: 0,
+            user_has_liked: false,
             replies_count: 0,
             reposts_count: 0,
-            views_count: '0',
+            views_count: 1,
           }));
           setUserPosts(formatted);
-        } else {
+        } else if (isMounted) {
           setUserPosts([]);
         }
       } catch (err) {
         console.warn('Error fetching user posts:', err);
-        setUserPosts([]);
+        if (isMounted) setUserPosts([]);
       } finally {
-        setIsLoadingPosts(false);
+        if (isMounted) setIsLoadingPosts(false);
       }
     };
 
     fetchTargetUserPosts();
-  }, [isOpen, user?.id, currentUser?.id]);
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isOpen, user?.id]);
 
   if (!isOpen || !user) return null;
 
   const isSelf = currentUser?.id === user.id;
   const isFollowed = isFollowing(user.id);
-  const followerCount = getFollowerCount(user.id, user.follower_count || 0);
-  const followingCount = getFollowingCount(user.id, user.following_count || 0);
+  const followerCount = getFollowerCount(user.id);
+  const followingCount = getFollowingCount(user.id);
 
-  const handleToggleLike = async (postId: string) => {
-    if (!currentUser) return;
-    setUserPosts((prev) =>
-      prev.map((p) => {
-        if (p.id === postId) {
-          const nextLiked = !p.user_has_liked;
-          return {
-            ...p,
-            user_has_liked: nextLiked,
-            likes_count: (p.likes_count || 0) + (nextLiked ? 1 : -1),
-          };
-        }
-        return p;
-      })
-    );
-
-    if (isSupabaseConfigured) {
-      try {
-        const post = userPosts.find((p) => p.id === postId);
-        const wasLiked = post?.user_has_liked;
-        if (!wasLiked) {
-          await supabase.from('likes').insert({
-            post_id: postId,
-            user_id: currentUser.id,
-            created_at: new Date().toISOString(),
-          });
-        } else {
-          await supabase
-            .from('likes')
-            .delete()
-            .match({ post_id: postId, user_id: currentUser.id });
-        }
-      } catch (e) {
-        console.warn(e);
-      }
-    }
+  const handleDeletePost = (postId: string) => {
+    setUserPosts((prev) => prev.filter((p) => p.id !== postId));
   };
 
-  const handleToggleBookmark = (postId: string) => {
-    setUserPosts((prev) =>
-      prev.map((p) =>
-        p.id === postId ? { ...p, user_has_bookmarked: !p.user_has_bookmarked } : p
-      )
-    );
-  };
-
-  const formatRelativeTime = (timestamp?: string) => {
-    if (!timestamp) return 'now';
-    try {
-      const now = new Date();
-      const postDate = new Date(timestamp);
-      const diffMs = now.getTime() - postDate.getTime();
-      const mins = Math.floor(diffMs / 60000);
-      if (mins < 1) return 'now';
-      if (mins < 60) return `${mins}m`;
-      const hours = Math.floor(mins / 60);
-      if (hours < 24) return `${hours}h`;
-      const days = Math.floor(hours / 24);
-      return `${days}d`;
-    } catch {
-      return '2h';
-    }
+  const handlePostUpdated = (updated: Post) => {
+    setUserPosts((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
   };
 
   return (
@@ -203,14 +144,14 @@ export const PublicProfileModal: React.FC<PublicProfileModalProps> = ({
                   )}
                 </div>
                 <p className="text-xs text-[#89919d] leading-none">
-                  {userPosts.length} posts
+                  {userPosts.length} {userPosts.length === 1 ? 'post' : 'posts'}
                 </p>
               </div>
             </div>
 
             <button
               onClick={onClose}
-              className="p-2 text-[#89919d] hover:text-white rounded-full hover:bg-[#18181b] transition-colors"
+              className="p-2 text-[#89919d] hover:text-white rounded-full hover:bg-[#18181b] transition-colors cursor-pointer"
             >
               <X className="w-4 h-4" />
             </button>
@@ -336,7 +277,7 @@ export const PublicProfileModal: React.FC<PublicProfileModalProps> = ({
                 </div>
               </div>
 
-              {/* Following & Follower stats */}
+              {/* Following & Follower stats (Strict dynamic follows query) */}
               <div className="flex items-center gap-4 text-xs">
                 <div className="flex items-center gap-1 text-[#89919d]">
                   <span className="font-bold text-[#e5e2e1]">{followingCount}</span>
@@ -367,7 +308,7 @@ export const PublicProfileModal: React.FC<PublicProfileModalProps> = ({
               ))}
             </div>
 
-            {/* Posts / Content List */}
+            {/* Posts / Content List (Using shared PostItem) */}
             <div className="divide-y divide-[#201f1f]">
               {isLoadingPosts ? (
                 <div className="py-12 flex flex-col items-center justify-center gap-2 text-xs text-[#71767b]">
@@ -386,98 +327,12 @@ export const PublicProfileModal: React.FC<PublicProfileModalProps> = ({
                 </div>
               ) : (
                 userPosts.map((post) => (
-                  <article
+                  <PostItem
                     key={post.id}
-                    className="p-4 hover:bg-[#080808] transition-colors flex gap-3"
-                  >
-                    <img
-                      src={
-                        user.avatar_url ||
-                        'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80'
-                      }
-                      alt={user.username}
-                      className="w-10 h-10 rounded-full object-cover shrink-0 border border-[#27272a]"
-                    />
-
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1.5 mb-1 truncate">
-                        <span className="font-bold text-sm text-[#e5e2e1] truncate">
-                          {user.display_name || user.username}
-                        </span>
-                        {user.verified && (
-                          <CheckCircle2 className="w-3.5 h-3.5 text-[#1d9bf0] fill-[#1d9bf0] shrink-0" />
-                        )}
-                        <span className="text-xs text-[#89919d] truncate">
-                          @{user.username}
-                        </span>
-                        <span className="text-[#89919d]">·</span>
-                        <span className="text-xs text-[#89919d]">
-                          {formatRelativeTime(post.created_at)}
-                        </span>
-                      </div>
-
-                      <p className="text-sm text-[#e5e2e1] leading-relaxed mb-3 break-words whitespace-pre-wrap">
-                        {post.content}
-                      </p>
-
-                      {post.image_url && (
-                        <div className="rounded-2xl border border-[#201f1f] overflow-hidden mb-3 max-h-[300px] bg-[#0e0e0e]">
-                          <img
-                            src={post.image_url}
-                            alt="Post media"
-                            className="w-full h-full object-cover max-h-[300px]"
-                          />
-                        </div>
-                      )}
-
-                      {/* Interactive Post Actions */}
-                      <div className="flex justify-between text-[#89919d] max-w-[400px] pt-1">
-                        <button
-                          className="flex items-center gap-1.5 hover:text-[#1d9bf0] transition-colors"
-                        >
-                          <MessageCircle className="w-4 h-4" />
-                          <span className="text-xs">{post.replies_count || 0}</span>
-                        </button>
-                        <button
-                          className="flex items-center gap-1.5 hover:text-emerald-500 transition-colors"
-                        >
-                          <Repeat2 className="w-4 h-4" />
-                          <span className="text-xs">{post.reposts_count || 0}</span>
-                        </button>
-                        <button
-                          onClick={() => handleToggleLike(post.id)}
-                          className={`flex items-center gap-1.5 transition-colors ${
-                            post.user_has_liked ? 'text-pink-500 font-bold' : 'hover:text-pink-500'
-                          }`}
-                        >
-                          <Heart
-                            className={`w-4 h-4 ${
-                              post.user_has_liked ? 'fill-pink-500 text-pink-500' : ''
-                            }`}
-                          />
-                          <span className="text-xs">{post.likes_count || 0}</span>
-                        </button>
-                        <button
-                          className="flex items-center gap-1.5 hover:text-[#1d9bf0] transition-colors"
-                        >
-                          <BarChart3 className="w-4 h-4" />
-                          <span className="text-xs">{post.views_count || 0}</span>
-                        </button>
-                        <button
-                          onClick={() => handleToggleBookmark(post.id)}
-                          className={`hover:text-[#1d9bf0] transition-colors ${
-                            post.user_has_bookmarked ? 'text-[#1d9bf0]' : ''
-                          }`}
-                        >
-                          <Bookmark
-                            className={`w-4 h-4 ${
-                              post.user_has_bookmarked ? 'fill-[#1d9bf0]' : ''
-                            }`}
-                          />
-                        </button>
-                      </div>
-                    </div>
-                  </article>
+                    post={post}
+                    onDeletePost={handleDeletePost}
+                    onPostUpdated={handlePostUpdated}
+                  />
                 ))
               )}
             </div>
