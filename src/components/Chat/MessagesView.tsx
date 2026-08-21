@@ -22,11 +22,13 @@ interface MessagesViewProps {
   initialPartner?: Profile | null;
   onUnreadChange?: (count: number) => void;
   onViewProfile?: (user: Profile) => void;
+  onMobileChatToggle?: (isOpen: boolean) => void;
 }
 
 export const MessagesView: React.FC<MessagesViewProps> = ({
   initialPartner,
   onViewProfile,
+  onMobileChatToggle,
 }) => {
   const { profile } = useAuth();
   const [conversations, setConversations] = useState<Profile[]>([]);
@@ -38,6 +40,11 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
   const [isSearchingUser, setIsSearchingUser] = useState(false);
   const [allUsers, setAllUsers] = useState<Profile[]>([]);
   const [isPartnerTyping, setIsPartnerTyping] = useState(false);
+
+  // Inform parent of mobile chat state for hiding/showing bottom nav
+  useEffect(() => {
+    onMobileChatToggle?.(showMobileChat);
+  }, [showMobileChat, onMobileChatToggle]);
 
   // Reply State
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
@@ -551,40 +558,43 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
   );
 
   return (
-    <main className="w-full max-w-[990px] min-h-screen border-r border-[#201f1f] flex pb-20 lg:pb-0 select-none">
+    <main className="w-full max-w-[990px] h-[100dvh] border-r border-neutral-800 flex overflow-hidden select-none">
       {/* Conversations Column */}
       <div
-        className={`w-full md:w-[380px] border-r border-[#201f1f] flex flex-col h-screen sticky top-0 bg-black shrink-0 ${
+        className={`w-full md:w-[380px] border-r border-neutral-800 flex flex-col h-[100dvh] bg-black shrink-0 overflow-hidden ${
           showMobileChat ? 'hidden md:flex' : 'flex'
         }`}
       >
-        {/* Header */}
-        <div className="p-4 border-b border-[#201f1f] flex items-center justify-between">
-          <h1 className="text-xl font-bold text-[#e5e2e1]">Messages</h1>
-          <button
-            onClick={() => setIsSearchingUser(true)}
-            className="p-2 text-[#89919d] hover:text-white rounded-full hover:bg-[#18181b] transition-colors cursor-pointer"
-            title="New Message"
-          >
-            <Edit3 className="w-5 h-5" />
-          </button>
-        </div>
+        {/* Fixed / Frozen Sticky Header (Title + Search) */}
+        <div className="sticky top-0 z-30 bg-black/90 backdrop-blur-md border-b border-neutral-800 w-full flex-none">
+          {/* Header Bar */}
+          <div className="p-4 flex items-center justify-between">
+            <h1 className="text-xl font-bold text-[#e5e2e1]">Messages</h1>
+            <button
+              onClick={() => setIsSearchingUser(true)}
+              className="p-2 text-[#89919d] hover:text-white rounded-full hover:bg-[#18181b] transition-colors cursor-pointer"
+              title="New Message"
+            >
+              <Edit3 className="w-5 h-5" />
+            </button>
+          </div>
 
-        {/* Search */}
-        <div className="p-3 border-b border-[#201f1f]">
-          <div className="relative">
-            <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-[#89919d]" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search Direct Messages"
-              className="w-full bg-[#18181b] border border-transparent rounded-full py-2 pl-10 pr-4 text-xs text-[#e5e2e1] placeholder-[#89919d] focus:border-[#1d9bf0] focus:ring-1 focus:ring-[#1d9bf0] outline-none"
-            />
+          {/* Search Box */}
+          <div className="px-3 pb-3">
+            <div className="relative">
+              <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-[#89919d]" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search Direct Messages"
+                className="w-full bg-[#18181b] border border-transparent rounded-full py-2 pl-10 pr-4 text-xs text-[#e5e2e1] placeholder-[#89919d] focus:border-[#1d9bf0] focus:ring-1 focus:ring-[#1d9bf0] outline-none"
+              />
+            </div>
           </div>
         </div>
 
-        {/* Conversation List */}
+        {/* Scrollable Conversation List */}
         <div className="flex-1 overflow-y-auto divide-y divide-[#18181b]">
           {filteredConversations.length === 0 ? (
             <div className="p-8 text-center text-[#89919d]">
@@ -636,18 +646,19 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
 
       {/* Active Chat Conversation Pane */}
       <div
-        className={`flex-1 flex flex-col h-screen sticky top-0 bg-black ${
+        className={`flex-1 flex flex-col h-[100dvh] bg-black overflow-hidden relative ${
           !showMobileChat ? 'hidden md:flex' : 'flex'
         }`}
       >
         {activePartner ? (
           <>
-            {/* Chat Top Header */}
-            <div className="p-3.5 border-b border-[#201f1f] flex items-center justify-between bg-black/90 backdrop-blur-md z-20">
+            {/* Fixed / Frozen Chat Top Header */}
+            <header className="sticky top-0 z-30 bg-black/90 backdrop-blur-md border-b border-neutral-800 w-full flex-none p-3.5 flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <button
                   onClick={() => setShowMobileChat(false)}
-                  className="md:hidden p-1.5 text-[#89919d] hover:text-white rounded-full hover:bg-[#18181b] cursor-pointer"
+                  className="md:hidden p-1.5 text-[#89919d] hover:text-white rounded-full hover:bg-[#18181b] cursor-pointer transition-colors"
+                  aria-label="Back to conversations"
                 >
                   <ArrowLeft className="w-5 h-5" />
                 </button>
@@ -682,9 +693,9 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                   </div>
                 </div>
               </div>
-            </div>
+            </header>
 
-            {/* Messages Scroll Area */}
+            {/* Independent Scrollable Messages Body Area */}
             <div className="flex-1 overflow-y-auto p-4 space-y-3 flex flex-col">
               {messages.length === 0 ? (
                 <div className="flex-1 flex flex-col items-center justify-center text-center p-8 text-[#89919d]">
@@ -698,7 +709,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                   </h3>
                   <p className="text-xs mb-3">@{activePartner.username}</p>
                   <p className="text-xs max-w-xs">
-                    Say hello to start the conversation! Swipe right on any message to reply, or use the menu to unsend or remove.
+                    Say hello to start the conversation! Swipe right on any message to reply, or swipe left on your own messages.
                   </p>
                 </div>
               ) : (
@@ -715,12 +726,13 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                         isMe ? 'items-end' : 'items-start'
                       } ${isHighlighted ? 'scale-[1.02]' : ''}`}
                     >
-                      {/* Swipeable container */}
+                      {/* Swipeable container with spring reset */}
                       <motion.div
                         drag="x"
                         dragSnapToOrigin={true}
-                        dragConstraints={isMe ? { left: -70, right: 0 } : { left: 0, right: 70 }}
-                        dragElastic={0.4}
+                        dragConstraints={isMe ? { left: -80, right: 0 } : { left: 0, right: 80 }}
+                        dragElastic={0.25}
+                        dragTransition={{ bounceStiffness: 600, bounceDamping: 25 }}
                         onDragEnd={(_, info) => {
                           if (isMe && (info.offset.x < -35 || info.velocity.x < -150)) {
                             handleInitiateReply(msg);
@@ -890,68 +902,72 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Replying Context Bar (Feature 1) */}
-            <AnimatePresence>
-              {replyingTo && (
-                <motion.div
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: 'auto' }}
-                  exit={{ opacity: 0, height: 0 }}
-                  transition={{ duration: 0.15 }}
-                  className="px-4 py-2.5 bg-[#141416] border-t border-[#201f1f] flex items-center justify-between text-xs"
-                >
-                  <div className="flex items-center gap-2 min-w-0 pr-3">
-                    <div className="w-1 h-8 rounded-full bg-[#1d9bf0] shrink-0" />
-                    <div className="min-w-0">
-                      <p className="font-bold text-[#e5e2e1] truncate flex items-center gap-1">
-                        <Reply className="w-3 h-3 text-[#1d9bf0]" />
-                        <span>
-                          Replying to{' '}
-                          {replyingTo.sender_id === profile?.id
-                            ? 'yourself'
-                            : replyingTo.sender_profile?.display_name ||
-                              activePartner.display_name ||
-                              `@${activePartner.username}`}
-                        </span>
-                      </p>
-                      <p className="text-[#89919d] truncate text-[11px]">
-                        {replyingTo.content}
-                      </p>
-                    </div>
-                  </div>
-
-                  <button
-                    onClick={handleCancelReply}
-                    className="p-1 text-[#89919d] hover:text-white hover:bg-[#27272a] rounded-full transition-colors cursor-pointer shrink-0"
-                    title="Cancel reply"
+            {/* Fixed Bottom Message Input Bar & Replying Context */}
+            <div className="sticky bottom-0 z-30 bg-black border-t border-neutral-800 flex-none w-full">
+              {/* Replying Context Bar */}
+              <AnimatePresence>
+                {replyingTo && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    transition={{ duration: 0.15 }}
+                    className="px-4 py-2.5 bg-[#141416] border-b border-[#201f1f] flex items-center justify-between text-xs"
                   >
-                    <X className="w-4 h-4" />
-                  </button>
-                </motion.div>
-              )}
-            </AnimatePresence>
+                    <div className="flex items-center gap-2 min-w-0 pr-3">
+                      <div className="w-1 h-8 rounded-full bg-[#1d9bf0] shrink-0" />
+                      <div className="min-w-0">
+                        <p className="font-bold text-[#e5e2e1] truncate flex items-center gap-1">
+                          <Reply className="w-3 h-3 text-[#1d9bf0]" />
+                          <span>
+                            Replying to{' '}
+                            {replyingTo.sender_id === profile?.id
+                              ? 'yourself'
+                              : replyingTo.sender_profile?.display_name ||
+                                activePartner.display_name ||
+                                `@${activePartner.username}`}
+                          </span>
+                        </p>
+                        <p className="text-[#89919d] truncate text-[11px]">
+                          {replyingTo.content}
+                        </p>
+                      </div>
+                    </div>
 
-            {/* Input Composer */}
-            <form
-              onSubmit={handleSendMessage}
-              className="p-3 border-t border-[#201f1f] bg-black flex items-center gap-2"
-            >
-              <input
-                ref={messageInputRef}
-                type="text"
-                value={inputText}
-                onChange={handleInputChange}
-                placeholder={replyingTo ? 'Type your reply...' : 'Start a new message...'}
-                className="flex-1 bg-[#18181b] border border-transparent rounded-full px-4 py-2.5 text-sm text-[#e5e2e1] placeholder-[#89919d] focus:border-[#1d9bf0] focus:ring-1 focus:ring-[#1d9bf0] outline-none"
-              />
-              <button
-                type="submit"
-                disabled={!inputText.trim()}
-                className="p-2.5 bg-[#1d9bf0] hover:bg-[#1a8cd8] text-white rounded-full transition-all disabled:opacity-30 cursor-pointer shadow-md active:scale-95"
+                    <button
+                      onClick={handleCancelReply}
+                      className="p-1 text-[#89919d] hover:text-white hover:bg-[#27272a] rounded-full transition-colors cursor-pointer shrink-0"
+                      title="Cancel reply"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {/* Input Composer Form */}
+              <form
+                onSubmit={handleSendMessage}
+                className="p-3 flex items-center gap-2"
               >
-                <Send className="w-4 h-4" />
-              </button>
-            </form>
+                <input
+                  ref={messageInputRef}
+                  type="text"
+                  value={inputText}
+                  onChange={handleInputChange}
+                  placeholder={replyingTo ? 'Type your reply...' : 'Start a new message...'}
+                  className="flex-1 bg-[#18181b] border border-transparent rounded-full px-4 py-2.5 text-sm text-[#e5e2e1] placeholder-[#89919d] focus:border-[#1d9bf0] focus:ring-1 focus:ring-[#1d9bf0] outline-none"
+                />
+                <button
+                  type="submit"
+                  disabled={!inputText.trim()}
+                  className="p-2.5 bg-[#1d9bf0] hover:bg-[#1a8cd8] text-white rounded-full transition-all disabled:opacity-30 cursor-pointer shadow-md active:scale-95 shrink-0"
+                  aria-label="Send message"
+                >
+                  <Send className="w-4 h-4" />
+                </button>
+              </form>
+            </div>
           </>
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-[#89919d]">

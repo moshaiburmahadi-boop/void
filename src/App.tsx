@@ -31,6 +31,7 @@ const MainApp: React.FC = () => {
   // Public profile modal state
   const [selectedPublicProfile, setSelectedPublicProfile] = useState<Profile | null>(null);
   const [directMessageUser, setDirectMessageUser] = useState<Profile | null>(null);
+  const [isMobileChatOpen, setIsMobileChatOpen] = useState(false);
 
   // Unread badge indicators (red dot & counts)
   const [hasUnreadMessages, setHasUnreadMessages] = useState(false);
@@ -180,6 +181,7 @@ const MainApp: React.FC = () => {
               initialPartner={directMessageUser}
               onUnreadChange={setUnreadMessages}
               onViewProfile={handleViewProfile}
+              onMobileChatToggle={setIsMobileChatOpen}
             />
           )}
 
@@ -203,15 +205,17 @@ const MainApp: React.FC = () => {
         </div>
 
         {/* Mobile Bottom Fixed Navigation Bar */}
-        <MobileBottomNav
-          activeTab={activeTab}
-          setActiveTab={setActiveTab}
-          onOpenCompose={() => setIsComposeOpen(true)}
-          unreadMessagesCount={unreadMessages}
-          unreadNotificationsCount={unreadNotifications}
-          hasUnreadMessages={hasUnreadMessages}
-          hasUnreadNotifications={hasUnreadNotifications}
-        />
+        {!(activeTab === 'messages' && isMobileChatOpen) && (
+          <MobileBottomNav
+            activeTab={activeTab}
+            setActiveTab={setActiveTab}
+            onOpenCompose={() => setIsComposeOpen(true)}
+            unreadMessagesCount={unreadMessages}
+            unreadNotificationsCount={unreadNotifications}
+            hasUnreadMessages={hasUnreadMessages}
+            hasUnreadNotifications={hasUnreadNotifications}
+          />
+        )}
 
         {/* Public Profile View Modal */}
         <PublicProfileModal
