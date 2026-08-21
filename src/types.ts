@@ -59,6 +59,15 @@ export interface Message {
   sender_profile?: Profile | null;
   receiver_profile?: Profile | null;
   read?: boolean;
+  reply_to_id?: string | null;
+  reply_to_message?: {
+    id: string;
+    content: string;
+    sender_id: string;
+    sender_profile?: Profile | null;
+  } | null;
+  is_unsent?: boolean;
+  deleted_for_user_ids?: string[] | null;
 }
 
 export type NotificationType = 'like' | 'repost' | 'follow' | 'mention';

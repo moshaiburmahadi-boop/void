@@ -120,14 +120,22 @@ CREATE INDEX IF NOT EXISTS idx_follows_following ON public.follows(following_id)
 CREATE INDEX IF NOT EXISTS idx_likes_post ON public.likes(post_id);
 CREATE INDEX IF NOT EXISTS idx_comments_post ON public.comments(post_id);
 
--- 6. Messages Table (Realtime Chat)
+-- 6. Messages Table (Realtime Chat with Reply, Unsend, Delete-for-me)
 CREATE TABLE IF NOT EXISTS public.messages (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   sender_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE NOT NULL,
   receiver_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE NOT NULL,
   content TEXT NOT NULL,
+  reply_to_id UUID REFERENCES public.messages(id) ON DELETE SET NULL,
+  is_unsent BOOLEAN DEFAULT FALSE,
+  deleted_for_user_ids UUID[] DEFAULT '{}',
   created_at TIMESTAMPTZ DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
 );
+
+-- For upgrading existing messages table:
+ALTER TABLE public.messages ADD COLUMN IF NOT EXISTS reply_to_id UUID REFERENCES public.messages(id) ON DELETE SET NULL;
+ALTER TABLE public.messages ADD COLUMN IF NOT EXISTS is_unsent BOOLEAN DEFAULT FALSE;
+ALTER TABLE public.messages ADD COLUMN IF NOT EXISTS deleted_for_user_ids UUID[] DEFAULT '{}';
 
 -- 7. Notifications Table
 CREATE TABLE IF NOT EXISTS public.notifications (
@@ -171,6 +179,8 @@ CREATE POLICY "Users can unfollow." ON public.follows FOR DELETE USING (auth.uid
 
 CREATE POLICY "Users can view their messages." ON public.messages FOR SELECT USING (auth.uid() = sender_id OR auth.uid() = receiver_id);
 CREATE POLICY "Users can send messages." ON public.messages FOR INSERT WITH CHECK (auth.uid() = sender_id);
+CREATE POLICY "Users can update their messages." ON public.messages FOR UPDATE USING (auth.uid() = sender_id OR auth.uid() = receiver_id);
+CREATE POLICY "Users can delete their messages." ON public.messages FOR DELETE USING (auth.uid() = sender_id);
 
 CREATE POLICY "Users can view their notifications." ON public.notifications FOR SELECT USING (auth.uid() = user_id);
 CREATE POLICY "Authenticated users can create notifications." ON public.notifications FOR INSERT WITH CHECK (auth.role() = 'authenticated');

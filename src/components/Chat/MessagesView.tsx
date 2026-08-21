@@ -9,8 +9,14 @@ import {
   ArrowLeft,
   CheckCircle2,
   Mail,
-  Users,
+  Reply,
+  MoreVertical,
+  Trash2,
+  EyeOff,
+  X,
+  CornerDownRight,
 } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 
 interface MessagesViewProps {
   initialPartner?: Profile | null;
@@ -20,7 +26,6 @@ interface MessagesViewProps {
 
 export const MessagesView: React.FC<MessagesViewProps> = ({
   initialPartner,
-  onUnreadChange,
   onViewProfile,
 }) => {
   const { profile } = useAuth();
@@ -34,7 +39,15 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
   const [allUsers, setAllUsers] = useState<Profile[]>([]);
   const [isPartnerTyping, setIsPartnerTyping] = useState(false);
 
+  // Reply State
+  const [replyingTo, setReplyingTo] = useState<Message | null>(null);
+
+  // Action Menu State (opened popover for a message)
+  const [activeMenuMessageId, setActiveMenuMessageId] = useState<string | null>(null);
+  const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messageInputRef = useRef<HTMLInputElement>(null);
   const typingDebounceRef = useRef<NodeJS.Timeout | null>(null);
   const partnerTypingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const channelRef = useRef<any>(null);
@@ -46,6 +59,19 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
   useEffect(() => {
     scrollToBottom();
   }, [messages, isPartnerTyping]);
+
+  // Handle click outside to close message action menu
+  useEffect(() => {
+    const handleClickOutside = () => {
+      setActiveMenuMessageId(null);
+    };
+    if (activeMenuMessageId) {
+      window.addEventListener('click', handleClickOutside);
+    }
+    return () => {
+      window.removeEventListener('click', handleClickOutside);
+    };
+  }, [activeMenuMessageId]);
 
   // If initialPartner changes from props, set active conversation
   useEffect(() => {
@@ -108,6 +134,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
     }
 
     setIsPartnerTyping(false);
+    setReplyingTo(null);
 
     if (isSupabaseConfigured) {
       const fetchHistory = async () => {
@@ -119,6 +146,9 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
               sender_id,
               receiver_id,
               content,
+              reply_to_id,
+              is_unsent,
+              deleted_for_user_ids,
               created_at,
               sender_profile:sender_id(*),
               receiver_profile:receiver_id(*)
@@ -129,12 +159,42 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
             .order('created_at', { ascending: true });
 
           if (!error && data) {
-            const formattedMessages: Message[] = (data as unknown as any[]).map((m) => ({
-              ...m,
-              sender_profile: Array.isArray(m.sender_profile) ? m.sender_profile[0] : m.sender_profile,
-              receiver_profile: Array.isArray(m.receiver_profile) ? m.receiver_profile[0] : m.receiver_profile,
-            }));
-            setMessages(formattedMessages);
+            // Filter out messages marked unsent or deleted for current user
+            const validMessages: Message[] = (data as unknown as any[])
+              .filter((m) => {
+                if (m.is_unsent) return false;
+                if (Array.isArray(m.deleted_for_user_ids) && m.deleted_for_user_ids.includes(profile.id)) {
+                  return false;
+                }
+                return true;
+              })
+              .map((m) => ({
+                ...m,
+                sender_profile: Array.isArray(m.sender_profile) ? m.sender_profile[0] : m.sender_profile,
+                receiver_profile: Array.isArray(m.receiver_profile) ? m.receiver_profile[0] : m.receiver_profile,
+              }));
+
+            // Resolve reply_to_message objects
+            const msgMap = new Map<string, Message>();
+            validMessages.forEach((m) => msgMap.set(m.id, m));
+
+            const resolved = validMessages.map((m) => {
+              if (m.reply_to_id && msgMap.has(m.reply_to_id)) {
+                const target = msgMap.get(m.reply_to_id)!;
+                return {
+                  ...m,
+                  reply_to_message: {
+                    id: target.id,
+                    content: target.content,
+                    sender_id: target.sender_id,
+                    sender_profile: target.sender_profile,
+                  },
+                };
+              }
+              return m;
+            });
+
+            setMessages(resolved);
           }
         } catch (err) {
           console.warn('Could not fetch messages:', err);
@@ -157,25 +217,44 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
             schema: 'public',
             table: 'messages',
           },
-          (payload) => {
+          async (payload) => {
             const newMsg = payload.new as Message;
             const isRelevant =
               (newMsg.sender_id === activePartner.id && newMsg.receiver_id === profile.id) ||
               (newMsg.sender_id === profile.id && newMsg.receiver_id === activePartner.id);
 
             if (isRelevant) {
+              if (newMsg.is_unsent) return;
+              if (Array.isArray(newMsg.deleted_for_user_ids) && newMsg.deleted_for_user_ids.includes(profile.id)) {
+                return;
+              }
+
               // Hide typing indicator when new message arrives
               if (newMsg.sender_id === activePartner.id) {
                 setIsPartnerTyping(false);
               }
 
               setMessages((prev) => {
-                // 1. Deduplicate by exact database ID
+                // Deduplicate by exact database ID
                 if (prev.some((m) => m.id === newMsg.id)) {
                   return prev;
                 }
 
-                // 2. Replace optimistic message
+                // If this is a reply, lookup the quoted message in current state
+                let replyQuote: Message['reply_to_message'] = null;
+                if (newMsg.reply_to_id) {
+                  const found = prev.find((m) => m.id === newMsg.reply_to_id);
+                  if (found) {
+                    replyQuote = {
+                      id: found.id,
+                      content: found.content,
+                      sender_id: found.sender_id,
+                      sender_profile: found.sender_profile,
+                    };
+                  }
+                }
+
+                // Replace optimistic message if exists
                 const tempIndex = prev.findIndex(
                   (m) =>
                     m.id.startsWith('temp_') &&
@@ -190,20 +269,56 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                     ...newMsg,
                     sender_profile: newMsg.sender_id === profile.id ? profile : activePartner,
                     receiver_profile: newMsg.receiver_id === profile.id ? profile : activePartner,
+                    reply_to_message: replyQuote || updated[tempIndex].reply_to_message,
                   };
                   return updated;
                 }
 
-                // 3. New incoming message
+                // New incoming message
                 return [
                   ...prev,
                   {
                     ...newMsg,
                     sender_profile: newMsg.sender_id === profile.id ? profile : activePartner,
                     receiver_profile: newMsg.receiver_id === profile.id ? profile : activePartner,
+                    reply_to_message: replyQuote,
                   },
                 ];
               });
+            }
+          }
+        )
+        // Listen for Realtime message deletions (Unsend / Delete for everyone)
+        .on(
+          'postgres_changes',
+          {
+            event: 'DELETE',
+            schema: 'public',
+            table: 'messages',
+          },
+          (payload) => {
+            const deletedId = (payload.old as { id: string })?.id;
+            if (deletedId) {
+              setMessages((prev) => prev.filter((m) => m.id !== deletedId));
+            }
+          }
+        )
+        // Listen for Realtime message updates (e.g. is_unsent or deleted_for_user_ids)
+        .on(
+          'postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'messages',
+          },
+          (payload) => {
+            const updated = payload.new as Message;
+            if (updated.is_unsent || (Array.isArray(updated.deleted_for_user_ids) && updated.deleted_for_user_ids.includes(profile.id))) {
+              setMessages((prev) => prev.filter((m) => m.id !== updated.id));
+            } else {
+              setMessages((prev) =>
+                prev.map((m) => (m.id === updated.id ? { ...m, ...updated } : m))
+              );
             }
           }
         )
@@ -213,7 +328,6 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
           if (userId === activePartner.id) {
             setIsPartnerTyping(Boolean(isTyping));
 
-            // Auto reset typing after 2.5s if no further typing broadcast received
             if (partnerTypingTimeoutRef.current) {
               clearTimeout(partnerTypingTimeoutRef.current);
             }
@@ -246,14 +360,12 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
     if (!profile || !activePartner || !channelRef.current) return;
 
     if (val.trim().length > 0) {
-      // Broadcast typing = true
       channelRef.current.send({
         type: 'broadcast',
         event: 'typing',
         payload: { userId: profile.id, isTyping: true },
       });
 
-      // Clear existing debounce and set 2-second timeout to broadcast typing = false
       if (typingDebounceRef.current) {
         clearTimeout(typingDebounceRef.current);
       }
@@ -268,7 +380,6 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
         }
       }, 2000);
     } else {
-      // If user clears the input, immediately broadcast typing = false
       if (typingDebounceRef.current) {
         clearTimeout(typingDebounceRef.current);
       }
@@ -280,12 +391,74 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
     }
   };
 
+  // Feature 1: Trigger Reply to a message
+  const handleInitiateReply = (targetMsg: Message) => {
+    setReplyingTo(targetMsg);
+    setActiveMenuMessageId(null);
+    setTimeout(() => {
+      messageInputRef.current?.focus();
+    }, 50);
+  };
+
+  // Cancel Replying
+  const handleCancelReply = () => {
+    setReplyingTo(null);
+  };
+
+  // Feature 2: Unsend Message (Delete for Everyone)
+  const handleUnsendMessage = async (msg: Message) => {
+    setActiveMenuMessageId(null);
+    // Optimistically remove from state
+    setMessages((prev) => prev.filter((m) => m.id !== msg.id));
+
+    if (isSupabaseConfigured) {
+      try {
+        const { error } = await supabase.from('messages').delete().eq('id', msg.id);
+        if (error) {
+          console.warn('Delete message error, falling back to update is_unsent:', error);
+          await supabase.from('messages').update({ is_unsent: true }).eq('id', msg.id);
+        }
+      } catch (err) {
+        console.error('Error unsending message:', err);
+      }
+    }
+  };
+
+  // Feature 3: Remove for Me (Delete for Me)
+  const handleRemoveForMe = async (msg: Message) => {
+    if (!profile) return;
+    setActiveMenuMessageId(null);
+
+    // Optimistically remove from current user's local state
+    setMessages((prev) => prev.filter((m) => m.id !== msg.id));
+
+    if (isSupabaseConfigured) {
+      try {
+        // Fetch current deleted_for_user_ids and append current user's ID
+        const existingDeleted = Array.isArray(msg.deleted_for_user_ids)
+          ? msg.deleted_for_user_ids
+          : [];
+        const updatedDeleted = Array.from(new Set([...existingDeleted, profile.id]));
+
+        await supabase
+          .from('messages')
+          .update({ deleted_for_user_ids: updatedDeleted })
+          .eq('id', msg.id);
+      } catch (err) {
+        console.error('Error removing message for me:', err);
+      }
+    }
+  };
+
+  // Send Message (with reply support)
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputText.trim() || !profile || !activePartner) return;
 
     const content = inputText.trim();
+    const replyTarget = replyingTo;
     setInputText('');
+    setReplyingTo(null);
 
     // Immediately stop typing broadcast
     if (typingDebounceRef.current) {
@@ -308,19 +481,34 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
       created_at: new Date().toISOString(),
       sender_profile: profile,
       receiver_profile: activePartner,
+      reply_to_id: replyTarget ? replyTarget.id : null,
+      reply_to_message: replyTarget
+        ? {
+            id: replyTarget.id,
+            content: replyTarget.content,
+            sender_id: replyTarget.sender_id,
+            sender_profile: replyTarget.sender_profile,
+          }
+        : null,
     };
 
     setMessages((prev) => [...prev, optimisticMsg]);
 
     if (isSupabaseConfigured) {
       try {
+        const payloadToInsert: any = {
+          sender_id: profile.id,
+          receiver_id: activePartner.id,
+          content,
+        };
+
+        if (replyTarget?.id && !replyTarget.id.startsWith('temp_')) {
+          payloadToInsert.reply_to_id = replyTarget.id;
+        }
+
         const { data, error } = await supabase
           .from('messages')
-          .insert({
-            sender_id: profile.id,
-            receiver_id: activePartner.id,
-            content,
-          })
+          .insert(payloadToInsert)
           .select('*, sender_profile:sender_id(*), receiver_profile:receiver_id(*)')
           .single();
 
@@ -332,6 +520,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                     ...data,
                     sender_profile: profile,
                     receiver_profile: activePartner,
+                    reply_to_message: optimisticMsg.reply_to_message,
                   }
                 : m
             )
@@ -340,6 +529,18 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
       } catch (err) {
         console.warn('Failed to send message to Supabase:', err);
       }
+    }
+  };
+
+  // Smooth scroll and highlight quoted message
+  const handleScrollToMessage = (targetMsgId: string) => {
+    const el = document.getElementById(`msg-${targetMsgId}`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setHighlightedMessageId(targetMsgId);
+      setTimeout(() => {
+        setHighlightedMessageId(null);
+      }, 1500);
     }
   };
 
@@ -391,7 +592,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
               <p className="text-xs mb-4">Start messaging any registered user on Void!</p>
               <button
                 onClick={() => setIsSearchingUser(true)}
-                className="px-4 py-1.5 bg-[#1d9bf0] text-white text-xs font-bold rounded-full hover:bg-[#1a8cd8]"
+                className="px-4 py-1.5 bg-[#1d9bf0] text-white text-xs font-bold rounded-full hover:bg-[#1a8cd8] cursor-pointer"
               >
                 Start Conversation
               </button>
@@ -442,11 +643,11 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
         {activePartner ? (
           <>
             {/* Chat Top Header */}
-            <div className="p-3.5 border-b border-[#201f1f] flex items-center justify-between bg-black/90 backdrop-blur-md">
+            <div className="p-3.5 border-b border-[#201f1f] flex items-center justify-between bg-black/90 backdrop-blur-md z-20">
               <div className="flex items-center gap-3">
                 <button
                   onClick={() => setShowMobileChat(false)}
-                  className="md:hidden p-1.5 text-[#89919d] hover:text-white rounded-full hover:bg-[#18181b]"
+                  className="md:hidden p-1.5 text-[#89919d] hover:text-white rounded-full hover:bg-[#18181b] cursor-pointer"
                 >
                   <ArrowLeft className="w-5 h-5" />
                 </button>
@@ -497,26 +698,164 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                   </h3>
                   <p className="text-xs mb-3">@{activePartner.username}</p>
                   <p className="text-xs max-w-xs">
-                    Say hello to start the conversation! Realtime messaging with instant delivery.
+                    Say hello to start the conversation! Swipe right on any message to reply, or use the menu to unsend or remove.
                   </p>
                 </div>
               ) : (
                 messages.map((msg) => {
                   const isMe = msg.sender_id === profile?.id;
+                  const isHighlighted = highlightedMessageId === msg.id;
+                  const isMenuOpen = activeMenuMessageId === msg.id;
+
                   return (
                     <div
                       key={msg.id}
-                      className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}
+                      id={`msg-${msg.id}`}
+                      className={`relative group flex flex-col transition-all duration-300 ${
+                        isMe ? 'items-end' : 'items-start'
+                      } ${isHighlighted ? 'scale-[1.02]' : ''}`}
                     >
-                      <div
-                        className={`max-w-[80%] sm:max-w-[70%] px-4 py-2.5 rounded-2xl text-sm leading-relaxed break-words whitespace-pre-wrap ${
-                          isMe
-                            ? 'bg-[#1d9bf0] text-white rounded-br-none'
-                            : 'bg-[#201f1f] text-[#e5e2e1] rounded-bl-none'
+                      {/* Swipeable container */}
+                      <motion.div
+                        drag="x"
+                        dragConstraints={{ left: 0, right: 80 }}
+                        dragElastic={0.2}
+                        onDragEnd={(_, info) => {
+                          if (info.offset.x > 50) {
+                            handleInitiateReply(msg);
+                          }
+                        }}
+                        className={`relative flex items-center gap-2 max-w-[85%] sm:max-w-[75%] ${
+                          isMe ? 'flex-row-reverse' : 'flex-row'
                         }`}
                       >
-                        {msg.content}
-                      </div>
+                        {/* Swipe Reply Icon Indicator (revealed on drag right) */}
+                        <div className="absolute -left-7 top-1/2 -translate-y-1/2 text-[#1d9bf0] opacity-70 pointer-events-none sm:hidden">
+                          <Reply className="w-4 h-4" />
+                        </div>
+
+                        {/* Message Bubble Container */}
+                        <div
+                          className={`relative px-4 py-2.5 rounded-2xl text-sm leading-relaxed break-words whitespace-pre-wrap transition-all shadow-sm ${
+                            isMe
+                              ? 'bg-[#1d9bf0] text-white rounded-br-none'
+                              : 'bg-[#201f1f] text-[#e5e2e1] rounded-bl-none border border-[#2b2b2b]'
+                          } ${isHighlighted ? 'ring-2 ring-[#1d9bf0] ring-offset-2 ring-offset-black' : ''}`}
+                        >
+                          {/* Render Quoted Reply Snippet if message is a reply */}
+                          {msg.reply_to_message && (
+                            <div
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleScrollToMessage(msg.reply_to_message!.id);
+                              }}
+                              className={`mb-2 p-2 rounded-lg text-xs cursor-pointer flex items-start gap-1.5 transition-all ${
+                                isMe
+                                  ? 'bg-white/15 text-white/90 border-l-2 border-white hover:bg-white/25'
+                                  : 'bg-[#161616] text-[#a1a1aa] border-l-2 border-[#1d9bf0] hover:bg-[#27272a]'
+                              }`}
+                              title="Click to view quoted message"
+                            >
+                              <CornerDownRight className="w-3.5 h-3.5 shrink-0 mt-0.5 opacity-70" />
+                              <div className="min-w-0 flex-1">
+                                <span className="font-bold block truncate opacity-90 text-[11px]">
+                                  {msg.reply_to_message.sender_id === profile?.id
+                                    ? 'You'
+                                    : msg.reply_to_message.sender_profile?.display_name ||
+                                      activePartner.display_name ||
+                                      activePartner.username}
+                                </span>
+                                <span className="line-clamp-1 opacity-80 text-[11px]">
+                                  {msg.reply_to_message.content}
+                                </span>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Message Text Content */}
+                          <span>{msg.content}</span>
+                        </div>
+
+                        {/* Desktop Action Controls (Hover Reply & 3-Dots Menu) */}
+                        <div
+                          className={`opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 shrink-0 ${
+                            isMenuOpen ? 'opacity-100' : ''
+                          }`}
+                        >
+                          {/* Desktop Quick Reply Button */}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleInitiateReply(msg);
+                            }}
+                            className="p-1.5 text-[#89919d] hover:text-[#1d9bf0] hover:bg-[#18181b] rounded-full transition-colors cursor-pointer"
+                            title="Reply to message"
+                          >
+                            <Reply className="w-3.5 h-3.5" />
+                          </button>
+
+                          {/* 3-Dots Context Menu Trigger */}
+                          <div className="relative">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setActiveMenuMessageId(isMenuOpen ? null : msg.id);
+                              }}
+                              className="p-1.5 text-[#89919d] hover:text-white hover:bg-[#18181b] rounded-full transition-colors cursor-pointer"
+                              title="Message options"
+                            >
+                              <MoreVertical className="w-3.5 h-3.5" />
+                            </button>
+
+                            {/* Dropdown Action Popover Menu */}
+                            <AnimatePresence>
+                              {isMenuOpen && (
+                                <motion.div
+                                  initial={{ opacity: 0, scale: 0.95, y: -6 }}
+                                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                                  exit={{ opacity: 0, scale: 0.95, y: -6 }}
+                                  transition={{ duration: 0.12 }}
+                                  onClick={(e) => e.stopPropagation()}
+                                  className={`absolute z-30 w-44 bg-[#18181b] border border-[#27272a] rounded-2xl shadow-2xl py-1.5 overflow-hidden text-xs ${
+                                    isMe ? 'right-0 top-7' : 'left-0 top-7'
+                                  }`}
+                                >
+                                  {/* Action: Reply */}
+                                  <button
+                                    onClick={() => handleInitiateReply(msg)}
+                                    className="w-full px-3.5 py-2 flex items-center gap-2.5 text-[#e5e2e1] hover:bg-[#27272a] transition-colors cursor-pointer font-medium"
+                                  >
+                                    <Reply className="w-3.5 h-3.5 text-[#1d9bf0]" />
+                                    <span>Reply</span>
+                                  </button>
+
+                                  {/* Feature 3: Remove for Me (Available on ANY message) */}
+                                  <button
+                                    onClick={() => handleRemoveForMe(msg)}
+                                    className="w-full px-3.5 py-2 flex items-center gap-2.5 text-[#89919d] hover:text-white hover:bg-[#27272a] transition-colors cursor-pointer font-medium"
+                                  >
+                                    <EyeOff className="w-3.5 h-3.5" />
+                                    <span>Delete for me</span>
+                                  </button>
+
+                                  {/* Feature 2: Unsend Message (Sent by current user only) */}
+                                  {isMe && (
+                                    <button
+                                      onClick={() => handleUnsendMessage(msg)}
+                                      className="w-full px-3.5 py-2 flex items-center gap-2.5 text-red-500 hover:text-red-400 hover:bg-red-950/30 transition-colors cursor-pointer font-medium border-t border-[#27272a]/60 mt-1 pt-2"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5 text-red-500" />
+                                      <span>Unsend for everyone</span>
+                                    </button>
+                                  )}
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
+                          </div>
+                        </div>
+                      </motion.div>
                     </div>
                   );
                 })
@@ -533,10 +872,10 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                     alt={activePartner.username}
                     className="w-7 h-7 rounded-full object-cover border border-[#27272a] shrink-0 mb-1"
                   />
-                  <div className="bg-neutral-800 text-neutral-300 rounded-full px-4 py-2 flex items-center gap-1.5 shadow-sm">
-                    <span className="w-2 h-2 bg-neutral-400 rounded-full animate-bounce [animation-delay:-0.3s]" />
-                    <span className="w-2 h-2 bg-neutral-400 rounded-full animate-bounce [animation-delay:-0.15s]" />
-                    <span className="w-2 h-2 bg-neutral-400 rounded-full animate-bounce" />
+                  <div className="bg-[#1e1e24] text-neutral-300 rounded-full px-4 py-2 flex items-center gap-1.5 shadow-sm border border-[#27272a]">
+                    <span className="w-2 h-2 bg-[#1d9bf0] rounded-full animate-bounce [animation-delay:-0.3s]" />
+                    <span className="w-2 h-2 bg-[#1d9bf0] rounded-full animate-bounce [animation-delay:-0.15s]" />
+                    <span className="w-2 h-2 bg-[#1d9bf0] rounded-full animate-bounce" />
                   </div>
                 </div>
               )}
@@ -544,22 +883,64 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
               <div ref={messagesEndRef} />
             </div>
 
+            {/* Replying Context Bar (Feature 1) */}
+            <AnimatePresence>
+              {replyingTo && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  transition={{ duration: 0.15 }}
+                  className="px-4 py-2.5 bg-[#141416] border-t border-[#201f1f] flex items-center justify-between text-xs"
+                >
+                  <div className="flex items-center gap-2 min-w-0 pr-3">
+                    <div className="w-1 h-8 rounded-full bg-[#1d9bf0] shrink-0" />
+                    <div className="min-w-0">
+                      <p className="font-bold text-[#e5e2e1] truncate flex items-center gap-1">
+                        <Reply className="w-3 h-3 text-[#1d9bf0]" />
+                        <span>
+                          Replying to{' '}
+                          {replyingTo.sender_id === profile?.id
+                            ? 'yourself'
+                            : replyingTo.sender_profile?.display_name ||
+                              activePartner.display_name ||
+                              `@${activePartner.username}`}
+                        </span>
+                      </p>
+                      <p className="text-[#89919d] truncate text-[11px]">
+                        {replyingTo.content}
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={handleCancelReply}
+                    className="p-1 text-[#89919d] hover:text-white hover:bg-[#27272a] rounded-full transition-colors cursor-pointer shrink-0"
+                    title="Cancel reply"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
             {/* Input Composer */}
             <form
               onSubmit={handleSendMessage}
               className="p-3 border-t border-[#201f1f] bg-black flex items-center gap-2"
             >
               <input
+                ref={messageInputRef}
                 type="text"
                 value={inputText}
                 onChange={handleInputChange}
-                placeholder="Start a new message..."
+                placeholder={replyingTo ? 'Type your reply...' : 'Start a new message...'}
                 className="flex-1 bg-[#18181b] border border-transparent rounded-full px-4 py-2.5 text-sm text-[#e5e2e1] placeholder-[#89919d] focus:border-[#1d9bf0] focus:ring-1 focus:ring-[#1d9bf0] outline-none"
               />
               <button
                 type="submit"
                 disabled={!inputText.trim()}
-                className="p-2.5 bg-[#1d9bf0] hover:bg-[#1a8cd8] text-white rounded-full transition-all disabled:opacity-30 cursor-pointer"
+                className="p-2.5 bg-[#1d9bf0] hover:bg-[#1a8cd8] text-white rounded-full transition-all disabled:opacity-30 cursor-pointer shadow-md active:scale-95"
               >
                 <Send className="w-4 h-4" />
               </button>
