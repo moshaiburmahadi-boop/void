@@ -120,7 +120,7 @@ CREATE INDEX IF NOT EXISTS idx_follows_following ON public.follows(following_id)
 CREATE INDEX IF NOT EXISTS idx_likes_post ON public.likes(post_id);
 CREATE INDEX IF NOT EXISTS idx_comments_post ON public.comments(post_id);
 
--- 6. Messages Table (Realtime Chat with Reply, Unsend, Delete-for-me)
+-- 6. Messages Table (Realtime Chat with Reply, Unsend, Delete-for-me, Edit)
 CREATE TABLE IF NOT EXISTS public.messages (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   sender_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE NOT NULL,
@@ -128,6 +128,7 @@ CREATE TABLE IF NOT EXISTS public.messages (
   content TEXT NOT NULL,
   reply_to_id UUID REFERENCES public.messages(id) ON DELETE SET NULL,
   is_unsent BOOLEAN DEFAULT FALSE,
+  is_edited BOOLEAN DEFAULT FALSE,
   deleted_for_user_ids UUID[] DEFAULT '{}',
   created_at TIMESTAMPTZ DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
 );
@@ -135,9 +136,23 @@ CREATE TABLE IF NOT EXISTS public.messages (
 -- For upgrading existing messages table:
 ALTER TABLE public.messages ADD COLUMN IF NOT EXISTS reply_to_id UUID REFERENCES public.messages(id) ON DELETE SET NULL;
 ALTER TABLE public.messages ADD COLUMN IF NOT EXISTS is_unsent BOOLEAN DEFAULT FALSE;
+ALTER TABLE public.messages ADD COLUMN IF NOT EXISTS is_edited BOOLEAN DEFAULT FALSE;
 ALTER TABLE public.messages ADD COLUMN IF NOT EXISTS deleted_for_user_ids UUID[] DEFAULT '{}';
 
--- 7. Notifications Table
+-- 7. Message Reactions Table (Emoji Reactions)
+CREATE TABLE IF NOT EXISTS public.message_reactions (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  message_id UUID REFERENCES public.messages(id) ON DELETE CASCADE NOT NULL,
+  user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE NOT NULL,
+  emoji TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
+  UNIQUE(message_id, user_id, emoji)
+);
+
+CREATE INDEX IF NOT EXISTS idx_reactions_message ON public.message_reactions(message_id);
+CREATE INDEX IF NOT EXISTS idx_reactions_user ON public.message_reactions(user_id);
+
+-- 8. Notifications Table
 CREATE TABLE IF NOT EXISTS public.notifications (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE NOT NULL,
@@ -154,6 +169,7 @@ ALTER TABLE public.likes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.comments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.follows ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.message_reactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Public profiles are viewable by everyone." ON public.profiles FOR SELECT USING (true);
@@ -182,6 +198,10 @@ CREATE POLICY "Users can send messages." ON public.messages FOR INSERT WITH CHEC
 CREATE POLICY "Users can update their messages." ON public.messages FOR UPDATE USING (auth.uid() = sender_id OR auth.uid() = receiver_id);
 CREATE POLICY "Users can delete their messages." ON public.messages FOR DELETE USING (auth.uid() = sender_id);
 
+CREATE POLICY "Reactions are viewable by everyone." ON public.message_reactions FOR SELECT USING (true);
+CREATE POLICY "Authenticated users can add reactions." ON public.message_reactions FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can remove their reactions." ON public.message_reactions FOR DELETE USING (auth.uid() = user_id);
+
 CREATE POLICY "Users can view their notifications." ON public.notifications FOR SELECT USING (auth.uid() = user_id);
 CREATE POLICY "Authenticated users can create notifications." ON public.notifications FOR INSERT WITH CHECK (auth.role() = 'authenticated');
 
@@ -209,6 +229,7 @@ CREATE TRIGGER on_auth_user_created
 
 -- Enable Realtime
 ALTER PUBLICATION supabase_realtime ADD TABLE public.messages;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.message_reactions;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.posts;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.likes;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.comments;

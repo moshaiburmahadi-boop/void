@@ -36,12 +36,22 @@ interface CallModalProps {
   onEndCall: () => void;
 }
 
-const ICE_SERVERS: RTCConfiguration = {
+const RTC_CONFIG: RTCConfiguration = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
-    { urls: 'stun:stun2.l.google.com:19302' },
+    {
+      urls: 'turn:openrelay.metered.ca:80',
+      username: 'openrelay',
+      credential: 'openrelay',
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443',
+      username: 'openrelay',
+      credential: 'openrelay',
+    },
   ],
+  iceCandidatePoolSize: 10,
 };
 
 export const CallModal: React.FC<CallModalProps> = ({
@@ -122,10 +132,22 @@ export const CallModal: React.FC<CallModalProps> = ({
       try {
         setErrorMessage(null);
 
-        // 1. Request Local Media Stream
+        // 1. Request Local Media Stream with Low-Latency Mobile-Optimized Constraints
         const constraints: MediaStreamConstraints = {
-          audio: true,
-          video: callType === 'video' ? { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' } : false,
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+          video:
+            callType === 'video'
+              ? {
+                  width: { ideal: 640, max: 854 },
+                  height: { ideal: 360, max: 480 },
+                  frameRate: { ideal: 15, max: 20 },
+                  facingMode: 'user',
+                }
+              : false,
         };
 
         let stream: MediaStream;
@@ -134,7 +156,13 @@ export const CallModal: React.FC<CallModalProps> = ({
         } catch (mediaErr: any) {
           console.warn('Primary media constraints failed, falling back to basic audio:', mediaErr);
           try {
-            stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            stream = await navigator.mediaDevices.getUserMedia({
+              audio: {
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true,
+              },
+            });
             setIsVideoDisabled(true);
           } catch (audioErr: any) {
             console.error('Microphone/Camera permission denied:', audioErr);
@@ -156,14 +184,37 @@ export const CallModal: React.FC<CallModalProps> = ({
           localVideoRef.current.srcObject = stream;
         }
 
-        // 2. Initialize RTCPeerConnection
-        const pc = new RTCPeerConnection(ICE_SERVERS);
+        // 2. Initialize RTCPeerConnection with Open-Relay TURN and Pool Size
+        const pc = new RTCPeerConnection(RTC_CONFIG);
         pcRef.current = pc;
 
         // Add local tracks to RTCPeerConnection
         stream.getTracks().forEach((track) => {
           pc.addTrack(track, stream);
         });
+
+        // Helper to cap video sender bitrate at 350kbps to eliminate jitter & bufferbloat
+        const applyBitrateLimit = () => {
+          try {
+            const senders = pc.getSenders();
+            const videoSender = senders.find((s) => s.track && s.track.kind === 'video');
+            if (videoSender) {
+              const parameters = videoSender.getParameters();
+              if (!parameters.encodings || parameters.encodings.length === 0) {
+                parameters.encodings = [{}];
+              }
+              parameters.encodings[0].maxBitrate = 350000; // 350 kbps cap
+              parameters.encodings[0].maxFramerate = 20;
+              videoSender.setParameters(parameters).catch((err) => {
+                console.warn('Could not set video sender parameters:', err);
+              });
+            }
+          } catch (err) {
+            console.warn('Error applying bitrate limits:', err);
+          }
+        };
+
+        applyBitrateLimit();
 
         // Remote Stream Setup
         const remoteStream = new MediaStream();
@@ -206,6 +257,7 @@ export const CallModal: React.FC<CallModalProps> = ({
           if (!isMounted) return;
           if (pc.connectionState === 'connected') {
             setCallStatus('connected');
+            applyBitrateLimit();
           } else if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
             handleHangUp(false);
           }
@@ -390,12 +442,28 @@ export const CallModal: React.FC<CallModalProps> = ({
       } else if (isVideoDisabled) {
         // Upgrade to video dynamically if device allows
         navigator.mediaDevices
-          ?.getUserMedia({ video: true })
+          ?.getUserMedia({
+            video: {
+              width: { ideal: 640, max: 854 },
+              height: { ideal: 360, max: 480 },
+              frameRate: { ideal: 15, max: 20 },
+              facingMode: 'user',
+            },
+          })
           .then((videoStream) => {
             const newTrack = videoStream.getVideoTracks()[0];
             if (newTrack && localStreamRef.current && pcRef.current) {
               localStreamRef.current.addTrack(newTrack);
-              pcRef.current.addTrack(newTrack, localStreamRef.current);
+              const sender = pcRef.current.addTrack(newTrack, localStreamRef.current);
+              try {
+                const parameters = sender.getParameters();
+                if (!parameters.encodings || parameters.encodings.length === 0) {
+                  parameters.encodings = [{}];
+                }
+                parameters.encodings[0].maxBitrate = 350000;
+                parameters.encodings[0].maxFramerate = 20;
+                sender.setParameters(parameters).catch(console.warn);
+              } catch (_) {}
               setIsVideoDisabled(false);
             }
           })

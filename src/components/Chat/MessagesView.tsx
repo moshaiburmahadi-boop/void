@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
-import { Message, Profile } from '../../types';
+import { Message, MessageReaction, Profile } from '../../types';
 import {
   Search,
   Edit3,
@@ -17,10 +17,16 @@ import {
   CornerDownRight,
   Phone,
   Video,
+  Smile,
+  Pencil,
+  Check,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { CallModal } from './CallModal';
 import { IncomingCallModal } from './IncomingCallModal';
+import { formatRelativeTime } from '../../utils/date';
+
+const QUICK_EMOJIS = ['❤️', '😂', '👍', '😮', '😢', '🔥'];
 
 interface MessagesViewProps {
   initialPartner?: Profile | null;
@@ -44,6 +50,9 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
   const [isSearchingUser, setIsSearchingUser] = useState(false);
   const [allUsers, setAllUsers] = useState<Profile[]>([]);
   const [isPartnerTyping, setIsPartnerTyping] = useState(false);
+
+  // Editing State
+  const [editingMessage, setEditingMessage] = useState<Message | null>(null);
 
   // 1-on-1 Call State
   const [activeCall, setActiveCall] = useState<{
@@ -71,6 +80,8 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
 
   // Action Menu State (opened popover for a message)
   const [activeMenuMessageId, setActiveMenuMessageId] = useState<string | null>(null);
+  // Emoji Picker Popover State
+  const [activeEmojiMessageId, setActiveEmojiMessageId] = useState<string | null>(null);
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -87,18 +98,19 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
     scrollToBottom();
   }, [messages, isPartnerTyping]);
 
-  // Handle click outside to close message action menu
+  // Handle click outside to close message action menu & emoji picker
   useEffect(() => {
     const handleClickOutside = () => {
       setActiveMenuMessageId(null);
+      setActiveEmojiMessageId(null);
     };
-    if (activeMenuMessageId) {
+    if (activeMenuMessageId || activeEmojiMessageId) {
       window.addEventListener('click', handleClickOutside);
     }
     return () => {
       window.removeEventListener('click', handleClickOutside);
     };
-  }, [activeMenuMessageId]);
+  }, [activeMenuMessageId, activeEmojiMessageId]);
 
   // If initialPartner changes from props, set active conversation
   useEffect(() => {
@@ -175,10 +187,12 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
               content,
               reply_to_id,
               is_unsent,
+              is_edited,
               deleted_for_user_ids,
               created_at,
               sender_profile:sender_id(*),
-              receiver_profile:receiver_id(*)
+              receiver_profile:receiver_id(*),
+              reactions:message_reactions(*)
             `)
             .or(
               `and(sender_id.eq.${profile.id},receiver_id.eq.${activePartner.id}),and(sender_id.eq.${activePartner.id},receiver_id.eq.${profile.id})`
@@ -199,6 +213,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                 ...m,
                 sender_profile: Array.isArray(m.sender_profile) ? m.sender_profile[0] : m.sender_profile,
                 receiver_profile: Array.isArray(m.receiver_profile) ? m.receiver_profile[0] : m.receiver_profile,
+                reactions: Array.isArray(m.reactions) ? m.reactions : [],
               }));
 
             // Resolve reply_to_message objects
@@ -294,6 +309,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                   const updated = [...prev];
                   updated[tempIndex] = {
                     ...newMsg,
+                    reactions: updated[tempIndex].reactions || [],
                     sender_profile: newMsg.sender_id === profile.id ? profile : activePartner,
                     receiver_profile: newMsg.receiver_id === profile.id ? profile : activePartner,
                     reply_to_message: replyQuote || updated[tempIndex].reply_to_message,
@@ -306,6 +322,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                   ...prev,
                   {
                     ...newMsg,
+                    reactions: [],
                     sender_profile: newMsg.sender_id === profile.id ? profile : activePartner,
                     receiver_profile: newMsg.receiver_id === profile.id ? profile : activePartner,
                     reply_to_message: replyQuote,
@@ -330,7 +347,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
             }
           }
         )
-        // Listen for Realtime message updates (e.g. is_unsent or deleted_for_user_ids)
+        // Listen for Realtime message updates (e.g. is_unsent, is_edited, or deleted_for_user_ids)
         .on(
           'postgres_changes',
           {
@@ -344,7 +361,66 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
               setMessages((prev) => prev.filter((m) => m.id !== updated.id));
             } else {
               setMessages((prev) =>
-                prev.map((m) => (m.id === updated.id ? { ...m, ...updated } : m))
+                prev.map((m) => (m.id === updated.id ? { ...m, ...updated, reactions: m.reactions || [] } : m))
+              );
+            }
+          }
+        )
+        // Listen for Realtime message reaction inserts
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'message_reactions',
+          },
+          (payload) => {
+            const newReaction = payload.new as MessageReaction;
+            if (newReaction && newReaction.message_id) {
+              setMessages((prev) =>
+                prev.map((m) => {
+                  if (m.id !== newReaction.message_id) return m;
+                  const existing = m.reactions || [];
+                  if (existing.some((r) => r.id === newReaction.id || (r.user_id === newReaction.user_id && r.emoji === newReaction.emoji))) {
+                    return m;
+                  }
+                  return {
+                    ...m,
+                    reactions: [...existing, newReaction],
+                  };
+                })
+              );
+            }
+          }
+        )
+        // Listen for Realtime message reaction deletes
+        .on(
+          'postgres_changes',
+          {
+            event: 'DELETE',
+            schema: 'public',
+            table: 'message_reactions',
+          },
+          (payload) => {
+            const oldReaction = payload.old as MessageReaction;
+            if (oldReaction) {
+              setMessages((prev) =>
+                prev.map((m) => {
+                  if (!m.reactions || m.reactions.length === 0) return m;
+                  const filtered = m.reactions.filter((r) => {
+                    if (oldReaction.id && r.id) {
+                      return r.id !== oldReaction.id;
+                    }
+                    if (oldReaction.message_id && oldReaction.user_id && oldReaction.emoji) {
+                      return !(r.message_id === oldReaction.message_id && r.user_id === oldReaction.user_id && r.emoji === oldReaction.emoji);
+                    }
+                    return true;
+                  });
+                  return {
+                    ...m,
+                    reactions: filtered,
+                  };
+                })
               );
             }
           }
@@ -494,6 +570,111 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
         event: 'typing',
         payload: { userId: profile.id, isTyping: false },
       });
+    }
+  };
+
+  // Feature: Initiate Message Editing (5-minute window)
+  const handleInitiateEdit = (msg: Message) => {
+    setActiveMenuMessageId(null);
+    setReplyingTo(null);
+    setEditingMessage(msg);
+    setInputText(msg.content);
+    setTimeout(() => {
+      messageInputRef.current?.focus();
+    }, 50);
+  };
+
+  // Cancel Message Editing
+  const handleCancelEdit = () => {
+    setEditingMessage(null);
+    setInputText('');
+  };
+
+  // Feature: Save Edited Message
+  const handleSaveEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingMessage || !inputText.trim() || !profile) return;
+
+    const newContent = inputText.trim();
+    const targetMsgId = editingMessage.id;
+    setEditingMessage(null);
+    setInputText('');
+
+    // Optimistically update message in local state
+    setMessages((prev) =>
+      prev.map((m) => (m.id === targetMsgId ? { ...m, content: newContent, is_edited: true } : m))
+    );
+
+    if (isSupabaseConfigured) {
+      try {
+        const { error } = await supabase
+          .from('messages')
+          .update({
+            content: newContent,
+            is_edited: true,
+          })
+          .eq('id', targetMsgId)
+          .eq('sender_id', profile.id);
+
+        if (error) {
+          console.error('Error saving edited message:', error);
+        }
+      } catch (err) {
+        console.error('Failed to update edited message:', err);
+      }
+    }
+  };
+
+  // Feature: Toggle Emoji Reaction
+  const handleToggleReaction = async (msg: Message, emoji: string) => {
+    if (!profile) return;
+    setActiveEmojiMessageId(null);
+    setActiveMenuMessageId(null);
+
+    const existingReactions = msg.reactions || [];
+    const hasReacted = existingReactions.some(
+      (r) => r.user_id === profile.id && r.emoji === emoji
+    );
+
+    let updatedReactions: MessageReaction[];
+    if (hasReacted) {
+      updatedReactions = existingReactions.filter(
+        (r) => !(r.user_id === profile.id && r.emoji === emoji)
+      );
+    } else {
+      const optimisticReaction: MessageReaction = {
+        id: `temp_react_${Date.now()}`,
+        message_id: msg.id,
+        user_id: profile.id,
+        emoji,
+      };
+      updatedReactions = [...existingReactions, optimisticReaction];
+    }
+
+    // Optimistic UI update
+    setMessages((prev) =>
+      prev.map((m) => (m.id === msg.id ? { ...m, reactions: updatedReactions } : m))
+    );
+
+    if (isSupabaseConfigured) {
+      try {
+        if (hasReacted) {
+          await supabase
+            .from('message_reactions')
+            .delete()
+            .eq('message_id', msg.id)
+            .eq('user_id', profile.id)
+            .eq('emoji', emoji);
+        } else {
+          await supabase.from('message_reactions').insert({
+            message_id: msg.id,
+            user_id: profile.id,
+            emoji,
+          });
+        }
+      } catch (err) {
+        console.error('Error toggling emoji reaction:', err);
+      }
     }
   };
 
@@ -836,6 +1017,30 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                   const isMe = msg.sender_id === profile?.id;
                   const isHighlighted = highlightedMessageId === msg.id;
                   const isMenuOpen = activeMenuMessageId === msg.id;
+                  const isEmojiOpen = activeEmojiMessageId === msg.id;
+
+                  // Check if editable: sent by current user and within 5 minutes
+                  const isEditable =
+                    isMe &&
+                    Date.now() - new Date(msg.created_at).getTime() <= 5 * 60 * 1000;
+
+                  // Group reactions by emoji
+                  const reactionGroups: { emoji: string; count: number; hasReacted: boolean }[] = [];
+                  if (msg.reactions && msg.reactions.length > 0) {
+                    const counts: { [emoji: string]: { count: number; hasReacted: boolean } } = {};
+                    msg.reactions.forEach((r) => {
+                      if (!counts[r.emoji]) {
+                        counts[r.emoji] = { count: 0, hasReacted: false };
+                      }
+                      counts[r.emoji].count += 1;
+                      if (r.user_id === profile?.id) {
+                        counts[r.emoji].hasReacted = true;
+                      }
+                    });
+                    Object.entries(counts).forEach(([emoji, data]) => {
+                      reactionGroups.push({ emoji, count: data.count, hasReacted: data.hasReacted });
+                    });
+                  }
 
                   return (
                     <div
@@ -912,14 +1117,79 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
 
                           {/* Message Text Content */}
                           <span>{msg.content}</span>
+
+                          {/* Message Meta Info: Timestamp & (edited) badge */}
+                          <div
+                            className={`flex items-center gap-1.5 mt-1 text-[10px] select-none ${
+                              isMe ? 'text-white/70 justify-end' : 'text-[#89919d] justify-start'
+                            }`}
+                          >
+                            <span>{formatRelativeTime(msg.created_at)}</span>
+                            {msg.is_edited && (
+                              <span className="italic opacity-80" title="Message has been edited">
+                                (edited)
+                              </span>
+                            )}
+                          </div>
                         </div>
 
-                        {/* Desktop Action Controls (Hover Reply & 3-Dots Menu) */}
+                        {/* Desktop Action Controls (Emoji Reaction, Hover Reply & 3-Dots Menu) */}
                         <div
                           className={`opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 shrink-0 ${
-                            isMenuOpen ? 'opacity-100' : ''
+                            isMenuOpen || isEmojiOpen ? 'opacity-100' : ''
                           }`}
                         >
+                          {/* Quick Emoji Reaction Trigger */}
+                          <div className="relative">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setActiveEmojiMessageId(isEmojiOpen ? null : msg.id);
+                                setActiveMenuMessageId(null);
+                              }}
+                              className="p-1.5 text-[#89919d] hover:text-[#1d9bf0] hover:bg-[#18181b] rounded-full transition-colors cursor-pointer"
+                              title="React with emoji"
+                            >
+                              <Smile className="w-3.5 h-3.5" />
+                            </button>
+
+                            {/* Floating Quick Emoji Picker Bar */}
+                            <AnimatePresence>
+                              {isEmojiOpen && (
+                                <motion.div
+                                  initial={{ opacity: 0, scale: 0.9, y: 6 }}
+                                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                                  exit={{ opacity: 0, scale: 0.9, y: 6 }}
+                                  transition={{ duration: 0.12 }}
+                                  onClick={(e) => e.stopPropagation()}
+                                  className={`absolute z-30 flex items-center gap-1 bg-[#1c1c1f] border border-[#2e2e33] rounded-full px-2 py-1 shadow-2xl ${
+                                    isMe ? 'right-0 -top-9' : 'left-0 -top-9'
+                                  }`}
+                                >
+                                  {QUICK_EMOJIS.map((emoji) => {
+                                    const isSelected = msg.reactions?.some(
+                                      (r) => r.user_id === profile?.id && r.emoji === emoji
+                                    );
+                                    return (
+                                      <button
+                                        key={emoji}
+                                        type="button"
+                                        onClick={() => handleToggleReaction(msg, emoji)}
+                                        className={`p-1 text-sm hover:scale-125 transition-transform cursor-pointer rounded-full ${
+                                          isSelected ? 'bg-[#1d9bf0]/20' : 'hover:bg-white/10'
+                                        }`}
+                                        title={`React ${emoji}`}
+                                      >
+                                        {emoji}
+                                      </button>
+                                    );
+                                  })}
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
+                          </div>
+
                           {/* Desktop Quick Reply Button */}
                           <button
                             type="button"
@@ -940,6 +1210,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setActiveMenuMessageId(isMenuOpen ? null : msg.id);
+                                setActiveEmojiMessageId(null);
                               }}
                               className="p-1.5 text-[#89919d] hover:text-white hover:bg-[#18181b] rounded-full transition-colors cursor-pointer"
                               title="Message options"
@@ -960,6 +1231,17 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                                     isMe ? 'right-0 top-7' : 'left-0 top-7'
                                   }`}
                                 >
+                                  {/* Feature 1: Edit Option (Show ONLY if sender and within 5 minutes) */}
+                                  {isEditable && (
+                                    <button
+                                      onClick={() => handleInitiateEdit(msg)}
+                                      className="w-full px-3.5 py-2 flex items-center gap-2.5 text-[#e5e2e1] hover:bg-[#27272a] transition-colors cursor-pointer font-medium"
+                                    >
+                                      <Pencil className="w-3.5 h-3.5 text-[#1d9bf0]" />
+                                      <span>Edit</span>
+                                    </button>
+                                  )}
+
                                   {/* Action: Reply */}
                                   <button
                                     onClick={() => handleInitiateReply(msg)}
@@ -994,6 +1276,32 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                           </div>
                         </div>
                       </motion.div>
+
+                      {/* Emoji Reaction Chips / Pills attached to bottom of bubble */}
+                      {reactionGroups.length > 0 && (
+                        <div
+                          className={`flex flex-wrap items-center gap-1.5 mt-1 ${
+                            isMe ? 'justify-end pr-1' : 'justify-start pl-1'
+                          }`}
+                        >
+                          {reactionGroups.map(({ emoji, count, hasReacted }) => (
+                            <button
+                              key={emoji}
+                              type="button"
+                              onClick={() => handleToggleReaction(msg, emoji)}
+                              className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs transition-all cursor-pointer border ${
+                                hasReacted
+                                  ? 'bg-[#1d9bf0]/20 border-[#1d9bf0]/60 text-[#1d9bf0]'
+                                  : 'bg-[#18181b] border-[#27272a] text-[#89919d] hover:border-[#3f3f46]'
+                              }`}
+                              title={hasReacted ? 'Click to remove reaction' : `Click to react ${emoji}`}
+                            >
+                              <span>{emoji}</span>
+                              <span className="font-semibold text-[11px]">{count}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   );
                 })
@@ -1021,11 +1329,47 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Fixed Bottom Message Input Bar & Replying Context */}
+            {/* Fixed Bottom Message Input Bar & Replying / Editing Context */}
             <div className="sticky bottom-0 z-30 bg-black border-t border-neutral-800 flex-none w-full">
+              {/* Editing Context Bar */}
+              <AnimatePresence>
+                {editingMessage && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    transition={{ duration: 0.15 }}
+                    className="px-4 py-2.5 bg-[#18181b] border-b border-[#27272a] flex items-center justify-between text-xs"
+                  >
+                    <div className="flex items-center gap-2 min-w-0 pr-3">
+                      <div className="w-1 h-8 rounded-full bg-[#1d9bf0] shrink-0" />
+                      <div className="min-w-0">
+                        <p className="font-bold text-[#1d9bf0] truncate flex items-center gap-1.5">
+                          <Pencil className="w-3 h-3 text-[#1d9bf0]" />
+                          <span>Editing message</span>
+                        </p>
+                        <p className="text-[#89919d] truncate text-[11px]">
+                          {editingMessage.content}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={handleCancelEdit}
+                        className="px-2.5 py-1 text-xs text-[#89919d] hover:text-white hover:bg-[#27272a] rounded-lg transition-colors cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
               {/* Replying Context Bar */}
               <AnimatePresence>
-                {replyingTo && (
+                {replyingTo && !editingMessage && (
                   <motion.div
                     initial={{ opacity: 0, height: 0 }}
                     animate={{ opacity: 1, height: 'auto' }}
@@ -1066,7 +1410,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
 
               {/* Input Composer Form */}
               <form
-                onSubmit={handleSendMessage}
+                onSubmit={editingMessage ? handleSaveEdit : handleSendMessage}
                 className="p-3 flex items-center gap-2"
               >
                 <input
@@ -1074,16 +1418,25 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                   type="text"
                   value={inputText}
                   onChange={handleInputChange}
-                  placeholder={replyingTo ? 'Type your reply...' : 'Start a new message...'}
+                  placeholder={
+                    editingMessage
+                      ? 'Edit message content...'
+                      : replyingTo
+                      ? 'Type your reply...'
+                      : 'Start a new message...'
+                  }
                   className="flex-1 bg-[#18181b] border border-transparent rounded-full px-4 py-2.5 text-sm text-[#e5e2e1] placeholder-[#89919d] focus:border-[#1d9bf0] focus:ring-1 focus:ring-[#1d9bf0] outline-none"
                 />
                 <button
                   type="submit"
                   disabled={!inputText.trim()}
-                  className="p-2.5 bg-[#1d9bf0] hover:bg-[#1a8cd8] text-white rounded-full transition-all disabled:opacity-30 cursor-pointer shadow-md active:scale-95 shrink-0"
-                  aria-label="Send message"
+                  className={`p-2.5 text-white rounded-full transition-all disabled:opacity-30 cursor-pointer shadow-md active:scale-95 shrink-0 flex items-center justify-center ${
+                    editingMessage ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-[#1d9bf0] hover:bg-[#1a8cd8]'
+                  }`}
+                  aria-label={editingMessage ? 'Save edit' : 'Send message'}
+                  title={editingMessage ? 'Save Changes' : 'Send'}
                 >
-                  <Send className="w-4 h-4" />
+                  {editingMessage ? <Check className="w-4 h-4" /> : <Send className="w-4 h-4" />}
                 </button>
               </form>
             </div>

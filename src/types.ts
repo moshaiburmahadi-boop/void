@@ -50,6 +50,14 @@ export interface Like {
   created_at?: string;
 }
 
+export interface MessageReaction {
+  id?: string;
+  message_id: string;
+  user_id: string;
+  emoji: string;
+  created_at?: string;
+}
+
 export interface Message {
   id: string;
   sender_id: string;
@@ -67,6 +75,8 @@ export interface Message {
     sender_profile?: Profile | null;
   } | null;
   is_unsent?: boolean;
+  is_edited?: boolean;
+  reactions?: MessageReaction[];
   deleted_for_user_ids?: string[] | null;
 }
 
