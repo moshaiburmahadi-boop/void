@@ -48,10 +48,9 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
           className="flex items-center gap-3 p-2 text-[#e5e2e1] hover:bg-[#18181b] rounded-full w-fit cursor-pointer transition-colors"
         >
           <img
-            src="/logo.png"
-            alt="Void"
-            className="w-9 h-9 rounded-full object-cover shadow-md border border-neutral-800"
-            referrerPolicy="no-referrer"
+            src="/favicon.png"
+            alt="Void Logo"
+            className="w-8 h-8 object-contain rounded-lg"
           />
           <span className="text-xl font-black tracking-tight">Void</span>
         </div>

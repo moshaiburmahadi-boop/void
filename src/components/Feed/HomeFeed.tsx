@@ -264,10 +264,9 @@ export const HomeFeed: React.FC<HomeFeedProps> = ({
           />
           <div className="flex items-center gap-2">
             <img
-              src="/logo.png"
-              alt="Void"
-              className="w-6 h-6 rounded-full object-cover border border-neutral-800"
-              referrerPolicy="no-referrer"
+              src="/favicon.png"
+              alt="Void Logo"
+              className="w-6 h-6 object-contain rounded-lg"
             />
             <h1 className="text-base font-extrabold tracking-tight text-[#e5e2e1]">Home</h1>
           </div>

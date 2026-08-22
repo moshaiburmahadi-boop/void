@@ -21,6 +21,8 @@ import {
   Smile,
   Pencil,
   Check,
+  Loader2,
+  UserPlus,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { CallModal } from './CallModal';
@@ -50,7 +52,9 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [showMobileChat, setShowMobileChat] = useState(Boolean(initialPartner));
   const [isSearchingUser, setIsSearchingUser] = useState(false);
-  const [allUsers, setAllUsers] = useState<Profile[]>([]);
+  const [pickerSearchQuery, setPickerSearchQuery] = useState('');
+  const [followedUsers, setFollowedUsers] = useState<Profile[]>([]);
+  const [isLoadingFollowedUsers, setIsLoadingFollowedUsers] = useState(false);
   const [isPartnerTyping, setIsPartnerTyping] = useState(false);
 
   // Editing State
@@ -128,6 +132,69 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
     }
   }, [initialPartner]);
 
+  // Fetch ONLY followed users when opening the "New Message" modal
+  useEffect(() => {
+    if (!isSearchingUser || !profile) return;
+
+    const fetchFollowedUsersForPicker = async () => {
+      setIsLoadingFollowedUsers(true);
+      if (isSupabaseConfigured) {
+        try {
+          // 1. Query follows table for all following_id where follower_id === currentUserId
+          const { data: followData, error: followErr } = await supabase
+            .from('follows')
+            .select('following_id')
+            .eq('follower_id', profile.id);
+
+          if (followErr) throw followErr;
+
+          const followingIds = Array.from(
+            new Set([
+              ...(followData || []).map((f: { following_id: string }) => f.following_id),
+              ...Object.keys(followingMap).filter((id) => followingMap[id] && id !== profile.id),
+            ])
+          );
+
+          if (followingIds.length === 0) {
+            setFollowedUsers([]);
+            setIsLoadingFollowedUsers(false);
+            return;
+          }
+
+          // 2. Fetch only profiles whose id is in followingIds
+          const { data: followedProfiles, error: profErr } = await supabase
+            .from('profiles')
+            .select('*')
+            .in('id', followingIds)
+            .order('display_name', { ascending: true });
+
+          if (profErr) throw profErr;
+
+          setFollowedUsers((followedProfiles || []) as Profile[]);
+        } catch (err) {
+          console.warn('Error fetching followed users for chat picker:', err);
+          // Fallback to followingMap
+          const fallback = Object.keys(followingMap)
+            .filter((id) => followingMap[id] && id !== profile.id)
+            .map((id) => conversations.find((c) => c.id === id))
+            .filter(Boolean) as Profile[];
+          setFollowedUsers(fallback);
+        } finally {
+          setIsLoadingFollowedUsers(false);
+        }
+      } else {
+        // Fallback in demo mode
+        const localFollowed = conversations.filter(
+          (u) => (isFollowing(u.id) || followingMap[u.id]) && u.id !== profile.id
+        );
+        setFollowedUsers(localFollowed);
+        setIsLoadingFollowedUsers(false);
+      }
+    };
+
+    fetchFollowedUsersForPicker();
+  }, [isSearchingUser, profile?.id, followingMap]);
+
   // Load existing profiles / conversations
   useEffect(() => {
     if (!profile) return;
@@ -135,16 +202,12 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
     const fetchUsersAndConversations = async () => {
       if (isSupabaseConfigured) {
         try {
-          // 1. Fetch all profiles for search & discovery in "New Message" modal
+          // 1. Fetch profiles
           const { data: profilesData } = await supabase
             .from('profiles')
             .select('*')
             .neq('id', profile.id)
             .limit(100);
-
-          if (profilesData) {
-            setAllUsers(profilesData as Profile[]);
-          }
 
           // 2. Fetch users whom the current logged-in user follows
           const { data: followData } = await supabase
@@ -202,7 +265,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
         }
       } else {
         // Fallback for mock/demo environment without configured Supabase
-        const mockAllowed = (allUsers.length > 0 ? allUsers : []).filter(
+        const mockAllowed = conversations.filter(
           (u) => isFollowing(u.id) || followingMap[u.id] || u.id === initialPartner?.id
         );
         if (initialPartner && !mockAllowed.some((c) => c.id === initialPartner.id)) {
@@ -1515,42 +1578,101 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
             <div className="p-4 border-b border-[#201f1f] flex items-center justify-between">
               <h3 className="font-bold text-sm text-[#e5e2e1]">New message</h3>
               <button
-                onClick={() => setIsSearchingUser(false)}
-                className="text-xs text-[#1d9bf0] font-bold cursor-pointer"
+                onClick={() => {
+                  setIsSearchingUser(false);
+                  setPickerSearchQuery('');
+                }}
+                className="text-xs text-[#1d9bf0] font-bold cursor-pointer hover:underline"
               >
                 Close
               </button>
             </div>
-            <div className="p-4 overflow-y-auto max-h-80 divide-y divide-[#18181b]">
-              {allUsers.length === 0 ? (
-                <p className="text-xs text-[#89919d] text-center py-6">
-                  No other users registered yet.
-                </p>
-              ) : (
-                allUsers.map((u) => (
-                  <div
-                    key={u.id}
-                    onClick={() => {
-                      setActivePartner(u);
-                      if (!conversations.some((c) => c.id === u.id)) {
-                        setConversations((prev) => [u, ...prev]);
-                      }
-                      setIsSearchingUser(false);
-                      setShowMobileChat(true);
-                    }}
-                    className="py-3 flex items-center gap-3 cursor-pointer hover:bg-[#18181b] px-2 rounded-xl"
+
+            {/* Search Input for Followed Users */}
+            <div className="p-3 border-b border-[#201f1f] bg-[#161618]">
+              <div className="flex items-center gap-2 bg-[#1f1f23] rounded-xl px-3 py-2 border border-[#2e2e34] focus-within:border-[#1d9bf0] transition-colors">
+                <Search className="w-4 h-4 text-[#89919d] shrink-0" />
+                <input
+                  type="text"
+                  value={pickerSearchQuery}
+                  onChange={(e) => setPickerSearchQuery(e.target.value)}
+                  placeholder="Search people you follow..."
+                  className="w-full bg-transparent text-xs text-[#e5e2e1] placeholder-[#89919d] outline-none"
+                  autoFocus
+                />
+                {pickerSearchQuery && (
+                  <button
+                    onClick={() => setPickerSearchQuery('')}
+                    className="text-[#89919d] hover:text-white"
                   >
-                    <img
-                      src={u.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80'}
-                      alt={u.username}
-                      className="w-10 h-10 rounded-full object-cover border border-[#27272a]"
-                    />
-                    <div>
-                      <p className="text-sm font-bold text-[#e5e2e1]">{u.display_name || u.username}</p>
-                      <p className="text-xs text-[#89919d]">@{u.username}</p>
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* List of Followed Users */}
+            <div className="p-3 overflow-y-auto max-h-80 divide-y divide-[#18181b]">
+              {isLoadingFollowedUsers ? (
+                <div className="py-8 flex flex-col items-center justify-center gap-2 text-[#89919d]">
+                  <Loader2 className="w-5 h-5 animate-spin text-[#1d9bf0]" />
+                  <p className="text-xs">Loading people you follow...</p>
+                </div>
+              ) : followedUsers.length === 0 ? (
+                <div className="p-6 text-center text-[#89919d]">
+                  <UserPlus className="w-8 h-8 text-[#89919d]/40 mx-auto mb-2" />
+                  <p className="text-xs font-semibold text-[#e5e2e1] mb-1">No followed users found</p>
+                  <p className="text-[11px] leading-relaxed text-[#89919d]">
+                    Follow other profiles first to start direct conversations with them.
+                  </p>
+                </div>
+              ) : (
+                (() => {
+                  const filtered = followedUsers.filter(
+                    (u) =>
+                      u.display_name?.toLowerCase().includes(pickerSearchQuery.toLowerCase()) ||
+                      u.username.toLowerCase().includes(pickerSearchQuery.toLowerCase())
+                  );
+
+                  if (filtered.length === 0) {
+                    return (
+                      <p className="text-xs text-[#89919d] text-center py-6">
+                        No matches found for "{pickerSearchQuery}".
+                      </p>
+                    );
+                  }
+
+                  return filtered.map((u) => (
+                    <div
+                      key={u.id}
+                      onClick={() => {
+                        setActivePartner(u);
+                        if (!conversations.some((c) => c.id === u.id)) {
+                          setConversations((prev) => [u, ...prev]);
+                        }
+                        setIsSearchingUser(false);
+                        setPickerSearchQuery('');
+                        setShowMobileChat(true);
+                      }}
+                      className="py-2.5 flex items-center gap-3 cursor-pointer hover:bg-[#18181b] px-3 rounded-xl transition-colors"
+                    >
+                      <img
+                        src={
+                          u.avatar_url ||
+                          'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80'
+                        }
+                        alt={u.username}
+                        className="w-10 h-10 rounded-full object-cover border border-[#27272a] shrink-0"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-bold text-[#e5e2e1] truncate">
+                          {u.display_name || u.username}
+                        </p>
+                        <p className="text-xs text-[#89919d] truncate">@{u.username}</p>
+                      </div>
                     </div>
-                  </div>
-                ))
+                  ));
+                })()
               )}
             </div>
           </div>
