@@ -64,7 +64,7 @@ export const SQLModal: React.FC<SQLModalProps> = ({ isOpen, onClose }) => {
             }`}
           >
             <Terminal className="w-4 h-4" />
-            SQL Migration Script (7 Tables + RLS)
+            SQL Migration Script (8 Tables + RLS)
           </button>
           <button
             onClick={() => setActiveSection('credentials')}
