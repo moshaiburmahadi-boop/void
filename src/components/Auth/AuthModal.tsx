@@ -44,9 +44,17 @@ export const AuthModal: React.FC<AuthModalProps> = () => {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-95 p-4 overflow-y-auto">
       <main className="w-full max-w-md my-auto flex flex-col items-center justify-center relative">
         {/* Brand Logo */}
-        <h1 className="text-4xl font-black text-[#e5e2e1] mb-8 tracking-tight font-sans">
-          Void
-        </h1>
+        <div className="flex flex-col items-center gap-3 mb-8">
+          <img
+            src="/logo.png"
+            alt="Void Logo"
+            className="w-16 h-16 rounded-2xl object-cover shadow-2xl border border-[#27272a] shadow-cyan-500/10"
+            referrerPolicy="no-referrer"
+          />
+          <h1 className="text-3xl font-black text-[#e5e2e1] tracking-tight font-sans">
+            Void
+          </h1>
+        </div>
 
         {/* Form Container */}
         <div className="w-full flex flex-col gap-4">
