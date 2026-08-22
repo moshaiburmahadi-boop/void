@@ -1,6 +1,6 @@
 {
   "name": "Void - Twitter/X Web App",
   "description": "Full-stack Twitter/X web app built with React, Tailwind CSS, and Supabase integration featuring Realtime Direct Messages, Feed, Likes, Notifications, and Profile management.",
-  "requestFramePermissions": [],
+  "requestFramePermissions": ["camera", "microphone"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

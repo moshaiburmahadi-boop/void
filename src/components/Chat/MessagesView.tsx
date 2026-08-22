@@ -15,8 +15,12 @@ import {
   EyeOff,
   X,
   CornerDownRight,
+  Phone,
+  Video,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { CallModal } from './CallModal';
+import { IncomingCallModal } from './IncomingCallModal';
 
 interface MessagesViewProps {
   initialPartner?: Profile | null;
@@ -40,6 +44,22 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
   const [isSearchingUser, setIsSearchingUser] = useState(false);
   const [allUsers, setAllUsers] = useState<Profile[]>([]);
   const [isPartnerTyping, setIsPartnerTyping] = useState(false);
+
+  // 1-on-1 Call State
+  const [activeCall, setActiveCall] = useState<{
+    isCaller: boolean;
+    callType: 'audio' | 'video';
+    remoteUser: Profile;
+    incomingOffer?: any;
+    callId?: string;
+  } | null>(null);
+
+  const [incomingCall, setIncomingCall] = useState<{
+    caller: Profile;
+    callType: 'audio' | 'video';
+    offer: any;
+    callId: string;
+  } | null>(null);
 
   // Inform parent of mobile chat state for hiding/showing bottom nav
   useEffect(() => {
@@ -358,6 +378,85 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
       };
     }
   }, [activePartner?.id, profile?.id]);
+
+  // Global listener for incoming calls targeting current user
+  useEffect(() => {
+    if (!profile?.id || !isSupabaseConfigured) return;
+
+    const myCallChannel = supabase.channel(`call_room_${profile.id}`);
+
+    myCallChannel
+      .on('broadcast', { event: 'call-request' }, (payload) => {
+        const { senderProfile, callType, offer, callId } = payload?.payload || {};
+        if (senderProfile && offer && callId) {
+          // If already in call, auto-reject with busy
+          if (activeCall) {
+            const rejectChannel = supabase.channel(`call_room_${senderProfile.id}`);
+            rejectChannel.send({
+              type: 'broadcast',
+              event: 'call-rejected',
+              payload: { callId },
+            });
+            return;
+          }
+
+          setIncomingCall({
+            caller: senderProfile,
+            callType: callType || 'video',
+            offer,
+            callId,
+          });
+        }
+      })
+      .on('broadcast', { event: 'call-ended' }, (payload) => {
+        const { callId } = payload?.payload || {};
+        if (incomingCall && incomingCall.callId === callId) {
+          setIncomingCall(null);
+        }
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(myCallChannel);
+    };
+  }, [profile?.id, activeCall, incomingCall]);
+
+  // Call Handlers
+  const handleStartCall = (type: 'audio' | 'video') => {
+    if (!activePartner || !profile) return;
+    setActiveCall({
+      isCaller: true,
+      callType: type,
+      remoteUser: activePartner,
+    });
+  };
+
+  const handleAcceptIncomingCall = () => {
+    if (!incomingCall || !profile) return;
+    setActiveCall({
+      isCaller: false,
+      callType: incomingCall.callType,
+      remoteUser: incomingCall.caller,
+      incomingOffer: incomingCall.offer,
+      callId: incomingCall.callId,
+    });
+    setIncomingCall(null);
+  };
+
+  const handleDeclineIncomingCall = () => {
+    if (!incomingCall) return;
+    const targetChannel = supabase.channel(`call_room_${incomingCall.caller.id}`);
+    targetChannel.send({
+      type: 'broadcast',
+      event: 'call-rejected',
+      payload: { callId: incomingCall.callId },
+    });
+    setIncomingCall(null);
+  };
+
+  const handleEndActiveCall = () => {
+    setActiveCall(null);
+  };
 
   // Emit typing broadcast event with 2s debounce
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -692,6 +791,26 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                     </span>
                   </div>
                 </div>
+              </div>
+
+              {/* Call Action Buttons (Audio & Video) */}
+              <div className="flex items-center gap-1 sm:gap-2">
+                <button
+                  onClick={() => handleStartCall('audio')}
+                  className="p-2 sm:p-2.5 text-[#89919d] hover:text-[#1d9bf0] hover:bg-[#18181b] rounded-full transition-colors cursor-pointer"
+                  title="Start Audio Call"
+                  aria-label="Start Audio Call"
+                >
+                  <Phone className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
+                </button>
+                <button
+                  onClick={() => handleStartCall('video')}
+                  className="p-2 sm:p-2.5 text-[#89919d] hover:text-[#1d9bf0] hover:bg-[#18181b] rounded-full transition-colors cursor-pointer"
+                  title="Start Video Call"
+                  aria-label="Start Video Call"
+                >
+                  <Video className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
+                </button>
               </div>
             </header>
 
@@ -1029,6 +1148,30 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
             </div>
           </div>
         </div>
+      )}
+      {/* Incoming Call Ringing Dialog */}
+      {incomingCall && (
+        <IncomingCallModal
+          isOpen={Boolean(incomingCall)}
+          caller={incomingCall.caller}
+          callType={incomingCall.callType}
+          onAccept={handleAcceptIncomingCall}
+          onDecline={handleDeclineIncomingCall}
+        />
+      )}
+
+      {/* Active Fullscreen WebRTC Call Modal */}
+      {activeCall && profile && (
+        <CallModal
+          isOpen={Boolean(activeCall)}
+          isCaller={activeCall.isCaller}
+          callType={activeCall.callType}
+          currentUser={profile}
+          remoteUser={activeCall.remoteUser}
+          incomingOffer={activeCall.incomingOffer}
+          callId={activeCall.callId}
+          onEndCall={handleEndActiveCall}
+        />
       )}
     </main>
   );
