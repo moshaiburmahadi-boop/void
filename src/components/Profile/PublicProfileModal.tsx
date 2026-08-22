@@ -36,6 +36,7 @@ export const PublicProfileModal: React.FC<PublicProfileModalProps> = ({
   const [activeSubTab, setActiveSubTab] = useState<'posts' | 'replies' | 'media' | 'likes'>('posts');
   const [userPosts, setUserPosts] = useState<Post[]>([]);
   const [isLoadingPosts, setIsLoadingPosts] = useState(false);
+  const [lightboxImage, setLightboxImage] = useState<{ url: string; alt?: string } | null>(null);
 
   // Sync follow counts from Supabase follows table for this user
   useEffect(() => {
@@ -161,7 +162,16 @@ export const PublicProfileModal: React.FC<PublicProfileModalProps> = ({
           <div className="flex-1 overflow-y-auto">
             {/* Banner Cover Photo */}
             <div className="h-36 sm:h-44 w-full bg-gradient-to-br from-[#121212] via-[#1c1c28] to-[#0a0a0f] relative overflow-hidden border-b border-[#201f1f]">
-              <div className="absolute inset-0 opacity-25 bg-[radial-gradient(#38bdf8_1px,transparent_1px)] [background-size:16px_16px]" />
+              {user.cover_url ? (
+                <img
+                  src={user.cover_url}
+                  alt="Cover photo"
+                  onClick={() => setLightboxImage({ url: user.cover_url!, alt: `${user.display_name || user.username}'s cover` })}
+                  className="w-full h-full object-cover cursor-pointer hover:opacity-95 transition-opacity"
+                />
+              ) : (
+                <div className="absolute inset-0 opacity-25 bg-[radial-gradient(#38bdf8_1px,transparent_1px)] [background-size:16px_16px]" />
+              )}
             </div>
 
             {/* Profile Avatar & Actions Header */}
@@ -171,10 +181,19 @@ export const PublicProfileModal: React.FC<PublicProfileModalProps> = ({
                   <img
                     src={
                       user.avatar_url ||
-                      'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80'
+                      'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400&auto=format&fit=crop&q=80'
                     }
                     alt={user.username}
-                    className="w-24 h-24 sm:w-28 sm:h-28 rounded-full object-cover border-4 border-black bg-black shrink-0"
+                    onClick={() =>
+                      setLightboxImage({
+                        url:
+                          user.avatar_url ||
+                          'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=800&auto=format&fit=crop&q=80',
+                        alt: `${user.display_name || user.username}'s avatar`,
+                      })
+                    }
+                    className="w-24 h-24 sm:w-28 sm:h-28 rounded-full object-cover border-4 border-black bg-black shrink-0 cursor-pointer hover:opacity-90 transition-opacity"
+                    title="Click to preview avatar"
                   />
                 </div>
 
@@ -338,6 +357,29 @@ export const PublicProfileModal: React.FC<PublicProfileModalProps> = ({
             </div>
           </div>
         </motion.div>
+
+        {/* Fullscreen Image Lightbox Preview */}
+        {lightboxImage && (
+          <div
+            className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4 backdrop-blur-sm"
+            onClick={() => setLightboxImage(null)}
+          >
+            <button
+              type="button"
+              onClick={() => setLightboxImage(null)}
+              className="absolute top-4 right-4 p-2.5 bg-black/60 hover:bg-white/20 text-white rounded-full transition-colors cursor-pointer z-10"
+              aria-label="Close image preview"
+            >
+              <X className="w-6 h-6" />
+            </button>
+            <img
+              src={lightboxImage.url}
+              alt={lightboxImage.alt || 'Full preview'}
+              onClick={(e) => e.stopPropagation()}
+              className="max-h-[90vh] max-w-[90vw] object-contain rounded-lg shadow-2xl select-none"
+            />
+          </div>
+        )}
       </div>
     </AnimatePresence>
   );

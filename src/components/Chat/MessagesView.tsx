@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
+import { useFollow } from '../../context/FollowContext';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { Message, MessageReaction, Profile } from '../../types';
 import {
@@ -41,6 +42,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
   onMobileChatToggle,
 }) => {
   const { profile } = useAuth();
+  const { isFollowing, followingMap } = useFollow();
   const [conversations, setConversations] = useState<Profile[]>([]);
   const [activePartner, setActivePartner] = useState<Profile | null>(initialPartner || null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -133,36 +135,88 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
     const fetchUsersAndConversations = async () => {
       if (isSupabaseConfigured) {
         try {
+          // 1. Fetch all profiles for search & discovery in "New Message" modal
           const { data: profilesData } = await supabase
             .from('profiles')
             .select('*')
             .neq('id', profile.id)
-            .limit(30);
+            .limit(100);
 
-          if (profilesData && profilesData.length > 0) {
+          if (profilesData) {
             setAllUsers(profilesData as Profile[]);
-            setConversations((prev) => {
-              const combined = [...prev];
-              profilesData.forEach((p) => {
-                if (!combined.some((c) => c.id === p.id)) {
-                  combined.push(p as Profile);
-                }
-              });
-              return combined;
-            });
+          }
 
-            if (!activePartner && !initialPartner && profilesData.length > 0) {
-              setActivePartner(profilesData[0] as Profile);
+          // 2. Fetch users whom the current logged-in user follows
+          const { data: followData } = await supabase
+            .from('follows')
+            .select('following_id')
+            .eq('follower_id', profile.id);
+
+          const followedIds = new Set<string>(
+            (followData || []).map((f: { following_id: string }) => f.following_id)
+          );
+
+          // 3. Fetch users with active chat history (messages sent or received)
+          const { data: messagesData } = await supabase
+            .from('messages')
+            .select('sender_id, receiver_id')
+            .or(`sender_id.eq.${profile.id},receiver_id.eq.${profile.id}`);
+
+          const activeChatIds = new Set<string>();
+          (messagesData || []).forEach((m: { sender_id: string; receiver_id: string }) => {
+            if (m.sender_id && m.sender_id !== profile.id) activeChatIds.add(m.sender_id);
+            if (m.receiver_id && m.receiver_id !== profile.id) activeChatIds.add(m.receiver_id);
+          });
+
+          // 4. Combine IDs: Followed users + active chat partners + initial partner + followingMap
+          const allowedUserIds = new Set<string>([
+            ...Array.from(followedIds),
+            ...Array.from(activeChatIds),
+            ...Object.keys(followingMap).filter((id) => followingMap[id]),
+          ]);
+          if (initialPartner?.id) {
+            allowedUserIds.add(initialPartner.id);
+          }
+
+          // 5. Filter conversation list strictly to allowed users
+          const candidateUsers = (profilesData || []) as Profile[];
+          const filteredConversations = candidateUsers.filter((p) => allowedUserIds.has(p.id));
+
+          // Ensure initialPartner is included in list if passed via prop
+          if (initialPartner && !filteredConversations.some((c) => c.id === initialPartner.id)) {
+            filteredConversations.unshift(initialPartner);
+          }
+
+          setConversations(filteredConversations);
+
+          // Set default active partner if not already selected
+          if (!activePartner) {
+            if (initialPartner) {
+              setActivePartner(initialPartner);
+            } else if (filteredConversations.length > 0) {
+              setActivePartner(filteredConversations[0]);
             }
           }
         } catch (err) {
           console.warn('Error fetching profiles for chat:', err);
         }
+      } else {
+        // Fallback for mock/demo environment without configured Supabase
+        const mockAllowed = (allUsers.length > 0 ? allUsers : []).filter(
+          (u) => isFollowing(u.id) || followingMap[u.id] || u.id === initialPartner?.id
+        );
+        if (initialPartner && !mockAllowed.some((c) => c.id === initialPartner.id)) {
+          mockAllowed.unshift(initialPartner);
+        }
+        setConversations(mockAllowed);
+        if (!activePartner && mockAllowed.length > 0) {
+          setActivePartner(mockAllowed[0]);
+        }
       }
     };
 
     fetchUsersAndConversations();
-  }, [profile?.id]);
+  }, [profile?.id, followingMap]);
 
   // Load message history & setup real-time broadcast and message listeners
   useEffect(() => {
@@ -879,12 +933,12 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
           {filteredConversations.length === 0 ? (
             <div className="p-8 text-center text-[#89919d]">
               <p className="text-sm font-semibold text-[#e5e2e1] mb-1">No conversations</p>
-              <p className="text-xs mb-4">Start messaging any registered user on Void!</p>
+              <p className="text-xs mb-4">Users you follow or have active chats with will appear here.</p>
               <button
                 onClick={() => setIsSearchingUser(true)}
                 className="px-4 py-1.5 bg-[#1d9bf0] text-white text-xs font-bold rounded-full hover:bg-[#1a8cd8] cursor-pointer"
               >
-                Start Conversation
+                New Message
               </button>
             </div>
           ) : (

@@ -3,6 +3,7 @@ export interface Profile {
   username: string;
   display_name?: string;
   avatar_url?: string | null;
+  cover_url?: string | null;
   bio?: string | null;
   website?: string | null;
   location?: string | null;

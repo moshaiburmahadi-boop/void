@@ -72,6 +72,7 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   username TEXT UNIQUE NOT NULL,
   display_name TEXT,
   avatar_url TEXT,
+  cover_url TEXT,
   bio TEXT,
   website TEXT,
   location TEXT,

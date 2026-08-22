@@ -3,6 +3,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useFollow } from '../../context/FollowContext';
 import { Post, Profile } from '../../types';
 import { PostItem } from '../Feed/PostItem';
+import { EditProfileModal } from '../EditProfileModal';
 import {
   ArrowLeft,
   Calendar,
@@ -30,15 +31,11 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   onDeletePost,
   onViewProfile,
 }) => {
-  const { profile, signOut, updateProfile } = useAuth();
+  const { profile, signOut } = useAuth();
   const { fetchUserFollowStats, getFollowerCount, getFollowingCount } = useFollow();
   const [activeSubTab, setActiveSubTab] = useState<'posts' | 'replies' | 'highlights' | 'media' | 'likes'>('posts');
   const [isEditing, setIsEditing] = useState(false);
-  const [displayName, setDisplayName] = useState(profile?.display_name || '');
-  const [bio, setBio] = useState(profile?.bio || '');
-  const [location, setLocation] = useState(profile?.location || '');
-  const [website, setWebsite] = useState(profile?.website || '');
-  const [avatarUrl, setAvatarUrl] = useState(profile?.avatar_url || '');
+  const [lightboxImage, setLightboxImage] = useState<{ url: string; alt?: string } | null>(null);
 
   // Dynamic follow counts directly from Supabase follows table
   useEffect(() => {
@@ -51,20 +48,12 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
     (p) => p.user_id === profile?.id || p.profiles?.username === profile?.username
   );
 
-  const handleSaveProfile = async (e: React.FormEvent) => {
-    e.preventDefault();
-    await updateProfile({
-      display_name: displayName,
-      bio,
-      location,
-      website,
-      avatar_url: avatarUrl,
-    });
-    setIsEditing(false);
-  };
-
   const followersNum = profile?.id ? getFollowerCount(profile.id) : 0;
   const followingNum = profile?.id ? getFollowingCount(profile.id) : 0;
+
+  const currentAvatar =
+    profile?.avatar_url ||
+    'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400&auto=format&fit=crop&q=80';
 
   return (
     <main className="w-full max-w-[600px] shrink-0 min-h-screen border-r border-[#201f1f] relative pb-20 lg:pb-8 select-none">
@@ -105,9 +94,18 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         )}
       </header>
 
-      {/* Banner */}
+      {/* Banner / Cover Photo */}
       <div className="h-44 sm:h-52 w-full bg-gradient-to-br from-[#121212] via-[#1a1a24] to-[#0a0a0f] relative overflow-hidden border-b border-[#201f1f]">
-        <div className="absolute inset-0 opacity-20 bg-[radial-gradient(#38bdf8_1px,transparent_1px)] [background-size:16px_16px]" />
+        {profile?.cover_url ? (
+          <img
+            src={profile.cover_url}
+            alt="Cover background"
+            onClick={() => setLightboxImage({ url: profile.cover_url!, alt: 'Cover Photo' })}
+            className="w-full h-full object-cover cursor-pointer hover:opacity-95 transition-opacity"
+          />
+        ) : (
+          <div className="absolute inset-0 opacity-20 bg-[radial-gradient(#38bdf8_1px,transparent_1px)] [background-size:16px_16px]" />
+        )}
       </div>
 
       {/* Profile Info Header */}
@@ -116,22 +114,22 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         <div className="flex justify-between items-end -mt-16 sm:-mt-20 mb-4">
           <div className="relative">
             <img
-              src={profile?.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80'}
+              src={currentAvatar}
               alt="Profile avatar"
-              className="w-28 h-28 sm:w-36 sm:h-36 rounded-full object-cover border-4 border-black bg-black"
+              onClick={() =>
+                setLightboxImage({
+                  url: currentAvatar,
+                  alt: `${profile?.display_name || profile?.username}'s avatar`,
+                })
+              }
+              className="w-28 h-28 sm:w-36 sm:h-36 rounded-full object-cover border-4 border-black bg-black cursor-pointer hover:opacity-90 transition-opacity"
+              title="Click to preview avatar"
             />
           </div>
 
           <div className="flex items-center gap-2">
             <button
-              onClick={() => {
-                setDisplayName(profile?.display_name || '');
-                setBio(profile?.bio || '');
-                setLocation(profile?.location || '');
-                setWebsite(profile?.website || '');
-                setAvatarUrl(profile?.avatar_url || '');
-                setIsEditing(true);
-              }}
+              onClick={() => setIsEditing(true)}
               className="px-4 py-2 border border-[#3f3f46] hover:border-white text-[#e5e2e1] hover:text-white rounded-full font-bold text-sm transition-all active:scale-95 flex items-center gap-1.5 cursor-pointer"
             >
               <Edit2 className="w-3.5 h-3.5" />
@@ -254,85 +252,34 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
       </div>
 
       {/* Edit Profile Modal */}
-      {isEditing && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-          <div className="bg-[#121212] border border-[#27272a] rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden">
-            <div className="p-4 border-b border-[#201f1f] flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={() => setIsEditing(false)}
-                  className="p-1.5 hover:bg-[#201f1f] rounded-full text-[#89919d] hover:text-white cursor-pointer"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-                <h3 className="font-bold text-base text-[#e5e2e1]">Edit profile</h3>
-              </div>
-              <button
-                onClick={handleSaveProfile}
-                className="px-4 py-1.5 bg-[#e5e2e1] text-black hover:bg-white font-bold text-xs rounded-full transition-all cursor-pointer"
-              >
-                Save
-              </button>
-            </div>
+      <EditProfileModal
+        isOpen={isEditing}
+        onClose={() => setIsEditing(false)}
+      />
 
-            <form onSubmit={handleSaveProfile} className="p-5 space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-[#89919d] mb-1">Display Name</label>
-                <input
-                  type="text"
-                  value={displayName}
-                  onChange={(e) => setDisplayName(e.target.value)}
-                  className="w-full bg-[#18181b] border border-[#27272a] rounded-xl px-3 py-2 text-sm text-[#e5e2e1] outline-none focus:border-[#1d9bf0]"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-[#89919d] mb-1">Bio</label>
-                <textarea
-                  rows={3}
-                  value={bio}
-                  onChange={(e) => setBio(e.target.value)}
-                  placeholder="Tell the world about yourself..."
-                  className="w-full bg-[#18181b] border border-[#27272a] rounded-xl px-3 py-2 text-sm text-[#e5e2e1] outline-none focus:border-[#1d9bf0] resize-none"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-[#89919d] mb-1">Location</label>
-                <input
-                  type="text"
-                  value={location}
-                  onChange={(e) => setLocation(e.target.value)}
-                  placeholder="e.g. San Francisco, CA"
-                  className="w-full bg-[#18181b] border border-[#27272a] rounded-xl px-3 py-2 text-sm text-[#e5e2e1] outline-none focus:border-[#1d9bf0]"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-[#89919d] mb-1">Website</label>
-                <input
-                  type="text"
-                  value={website}
-                  onChange={(e) => setWebsite(e.target.value)}
-                  placeholder="https://yourwebsite.com"
-                  className="w-full bg-[#18181b] border border-[#27272a] rounded-xl px-3 py-2 text-sm text-[#e5e2e1] outline-none focus:border-[#1d9bf0]"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-[#89919d] mb-1">Avatar Image URL</label>
-                <input
-                  type="url"
-                  value={avatarUrl}
-                  onChange={(e) => setAvatarUrl(e.target.value)}
-                  placeholder="https://images.unsplash.com/..."
-                  className="w-full bg-[#18181b] border border-[#27272a] rounded-xl px-3 py-2 text-sm text-[#e5e2e1] outline-none focus:border-[#1d9bf0]"
-                />
-              </div>
-            </form>
-          </div>
+      {/* Fullscreen Image Lightbox Preview */}
+      {lightboxImage && (
+        <div
+          className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4 backdrop-blur-sm"
+          onClick={() => setLightboxImage(null)}
+        >
+          <button
+            type="button"
+            onClick={() => setLightboxImage(null)}
+            className="absolute top-4 right-4 p-2.5 bg-black/60 hover:bg-white/20 text-white rounded-full transition-colors cursor-pointer z-10"
+            aria-label="Close image preview"
+          >
+            <X className="w-6 h-6" />
+          </button>
+          <img
+            src={lightboxImage.url}
+            alt={lightboxImage.alt || 'Full preview'}
+            onClick={(e) => e.stopPropagation()}
+            className="max-h-[90vh] max-w-[90vw] object-contain rounded-lg shadow-2xl select-none"
+          />
         </div>
       )}
     </main>
   );
 };
+
