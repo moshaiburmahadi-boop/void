@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Profile } from '../../types';
+import { Profile, Message } from '../../types';
 import { supabase } from '../../lib/supabase';
 import {
   Mic,
@@ -34,7 +34,21 @@ interface CallModalProps {
   incomingOffer?: any; // RTCSessionDescriptionInit if incoming call
   callId?: string;
   onEndCall: () => void;
+  onLogCall?: (callLog: Message) => void;
 }
+
+export const formatCallDurationText = (seconds: number, type: 'audio' | 'video', isMissed: boolean): string => {
+  const typeLabel = type === 'video' ? 'Video Call' : 'Audio Call';
+  if (isMissed || seconds <= 0) {
+    return `Missed ${typeLabel}`;
+  }
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  if (mins === 0) {
+    return `${typeLabel} • ${secs}s`;
+  }
+  return `${typeLabel} • ${mins}m ${secs > 0 ? `${secs}s` : ''}`.trim();
+};
 
 const RTC_CONFIG: RTCConfiguration = {
   iceServers: [
@@ -63,6 +77,7 @@ export const CallModal: React.FC<CallModalProps> = ({
   incomingOffer,
   callId: initialCallId,
   onEndCall,
+  onLogCall,
 }) => {
   const [callStatus, setCallStatus] = useState<CallStatus>(isCaller ? 'calling' : 'connecting');
   const [duration, setDuration] = useState(0);
@@ -85,6 +100,16 @@ export const CallModal: React.FC<CallModalProps> = ({
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const callIdRef = useRef<string>(initialCallId || `call_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`);
 
+  // Call history logging state refs
+  const startTimeRef = useRef<number | null>(null);
+  const durationRef = useRef<number>(0);
+  const hasLoggedRef = useRef<boolean>(false);
+  const callStatusRef = useRef<CallStatus>(callStatus);
+
+  useEffect(() => {
+    callStatusRef.current = callStatus;
+  }, [callStatus]);
+
   // Format Call Duration Seconds -> MM:SS
   const formatDuration = (totalSeconds: number) => {
     const mins = Math.floor(totalSeconds / 60);
@@ -92,12 +117,89 @@ export const CallModal: React.FC<CallModalProps> = ({
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
+  // Record and persist call log
+  const recordCallLog = async (overrideStatus?: CallStatus) => {
+    if (hasLoggedRef.current) return;
+    hasLoggedRef.current = true;
+
+    const currentDuration =
+      durationRef.current > 0
+        ? durationRef.current
+        : startTimeRef.current
+        ? Math.max(0, Math.floor((Date.now() - startTimeRef.current) / 1000))
+        : 0;
+
+    const statusToCheck = overrideStatus || callStatusRef.current;
+    const isConnected = statusToCheck === 'connected' || currentDuration > 0;
+    const finalStatus = isConnected ? 'completed' : 'missed';
+    const content = formatCallLogContentText(currentDuration, callType, !isConnected);
+
+    const callLog: Message = {
+      id: `call_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      sender_id: currentUser.id,
+      receiver_id: remoteUser.id,
+      content,
+      created_at: new Date().toISOString(),
+      message_type: 'call',
+      call_status: finalStatus,
+      call_type: callType,
+      duration_seconds: isConnected ? currentDuration : null,
+      sender_profile: currentUser,
+      receiver_profile: remoteUser,
+    };
+
+    if (onLogCall) {
+      onLogCall(callLog);
+    }
+
+    // Only the caller persists the record to avoid duplicate database rows
+    if (isCaller) {
+      try {
+        const { error } = await supabase.from('messages').insert({
+          sender_id: currentUser.id,
+          receiver_id: remoteUser.id,
+          content,
+          message_type: 'call',
+          call_status: finalStatus,
+          call_type: callType,
+          duration_seconds: isConnected ? currentDuration : null,
+        });
+        if (error) {
+          console.warn('Could not insert call history record in Supabase:', error);
+        }
+      } catch (err) {
+        console.warn('Call logging error:', err);
+      }
+    }
+  };
+
+  // Helper function for log text formatting
+  function formatCallLogContentText(secs: number, type: 'audio' | 'video', isMissed: boolean): string {
+    const typeLabel = type === 'video' ? 'Video Call' : 'Audio Call';
+    if (isMissed || secs <= 0) {
+      return `Missed ${typeLabel}`;
+    }
+    const mins = Math.floor(secs / 60);
+    const remainderSecs = secs % 60;
+    if (mins === 0) {
+      return `${typeLabel} • ${remainderSecs}s`;
+    }
+    return `${typeLabel} • ${mins}m ${remainderSecs > 0 ? `${remainderSecs}s` : '00s'}`;
+  }
+
   // Timer counter when call is connected
   useEffect(() => {
     if (callStatus === 'connected') {
+      if (!startTimeRef.current) {
+        startTimeRef.current = Date.now();
+      }
       callSounds.stop();
       timerRef.current = setInterval(() => {
-        setDuration((prev) => prev + 1);
+        setDuration((prev) => {
+          const next = prev + 1;
+          durationRef.current = next;
+          return next;
+        });
       }, 1000);
     } else {
       if (timerRef.current) {
@@ -296,6 +398,7 @@ export const CallModal: React.FC<CallModalProps> = ({
             const { callId } = eventPayload?.payload || {};
             if (callId === callIdRef.current) {
               setCallStatus('rejected');
+              recordCallLog('rejected');
               callSounds.playEndCallTone();
               setTimeout(() => {
                 onEndCall();
@@ -319,7 +422,9 @@ export const CallModal: React.FC<CallModalProps> = ({
           .on('broadcast', { event: 'call-ended' }, (eventPayload) => {
             const { callId } = eventPayload?.payload || {};
             if (callId === callIdRef.current) {
+              const prev = callStatusRef.current;
               setCallStatus('ended');
+              recordCallLog(prev);
               callSounds.playEndCallTone();
               setTimeout(() => {
                 onEndCall();
@@ -395,6 +500,7 @@ export const CallModal: React.FC<CallModalProps> = ({
 
     return () => {
       isMounted = false;
+      recordCallLog();
       cleanupMediaAndPeer();
     };
   }, [isOpen]);
@@ -497,7 +603,9 @@ export const CallModal: React.FC<CallModalProps> = ({
   // Hang Up Call
   const handleHangUp = (broadcastEnd = true) => {
     callSounds.playEndCallTone();
+    const prevStatus = callStatusRef.current;
     setCallStatus('ended');
+    recordCallLog(prevStatus);
 
     if (broadcastEnd && signalingChannelRef.current) {
       signalingChannelRef.current.send({

@@ -121,7 +121,7 @@ CREATE INDEX IF NOT EXISTS idx_follows_following ON public.follows(following_id)
 CREATE INDEX IF NOT EXISTS idx_likes_post ON public.likes(post_id);
 CREATE INDEX IF NOT EXISTS idx_comments_post ON public.comments(post_id);
 
--- 6. Messages Table (Realtime Chat with Reply, Unsend, Delete-for-me, Edit)
+-- 6. Messages Table (Realtime Chat with Reply, Unsend, Delete-for-me, Edit, Call History)
 CREATE TABLE IF NOT EXISTS public.messages (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   sender_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE NOT NULL,
@@ -131,6 +131,10 @@ CREATE TABLE IF NOT EXISTS public.messages (
   is_unsent BOOLEAN DEFAULT FALSE,
   is_edited BOOLEAN DEFAULT FALSE,
   deleted_for_user_ids UUID[] DEFAULT '{}',
+  message_type TEXT DEFAULT 'text',
+  call_status TEXT,
+  call_type TEXT,
+  duration_seconds INTEGER,
   created_at TIMESTAMPTZ DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
 );
 
@@ -139,6 +143,10 @@ ALTER TABLE public.messages ADD COLUMN IF NOT EXISTS reply_to_id UUID REFERENCES
 ALTER TABLE public.messages ADD COLUMN IF NOT EXISTS is_unsent BOOLEAN DEFAULT FALSE;
 ALTER TABLE public.messages ADD COLUMN IF NOT EXISTS is_edited BOOLEAN DEFAULT FALSE;
 ALTER TABLE public.messages ADD COLUMN IF NOT EXISTS deleted_for_user_ids UUID[] DEFAULT '{}';
+ALTER TABLE public.messages ADD COLUMN IF NOT EXISTS message_type TEXT DEFAULT 'text';
+ALTER TABLE public.messages ADD COLUMN IF NOT EXISTS call_status TEXT;
+ALTER TABLE public.messages ADD COLUMN IF NOT EXISTS call_type TEXT;
+ALTER TABLE public.messages ADD COLUMN IF NOT EXISTS duration_seconds INTEGER;
 
 -- 7. Message Reactions Table (Emoji Reactions)
 CREATE TABLE IF NOT EXISTS public.message_reactions (

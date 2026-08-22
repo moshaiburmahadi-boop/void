@@ -79,6 +79,10 @@ export interface Message {
   is_edited?: boolean;
   reactions?: MessageReaction[];
   deleted_for_user_ids?: string[] | null;
+  message_type?: 'text' | 'call' | 'image' | string;
+  call_status?: 'missed' | 'completed' | 'declined' | 'rejected' | 'failed' | string;
+  call_type?: 'audio' | 'video';
+  duration_seconds?: number | null;
 }
 
 export type NotificationType = 'like' | 'repost' | 'follow' | 'mention';

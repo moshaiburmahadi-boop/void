@@ -17,7 +17,10 @@ import {
   X,
   CornerDownRight,
   Phone,
+  PhoneCall,
+  PhoneMissed,
   Video,
+  VideoOff,
   Smile,
   Pencil,
   Check,
@@ -306,6 +309,10 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
               is_unsent,
               is_edited,
               deleted_for_user_ids,
+              message_type,
+              call_status,
+              call_type,
+              duration_seconds,
               created_at,
               sender_profile:sender_id(*),
               receiver_profile:receiver_id(*),
@@ -1131,6 +1138,96 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                 </div>
               ) : (
                 messages.map((msg) => {
+                  // Custom Call Log Message Card Rendering
+                  if (msg.message_type === 'call') {
+                    const isMissed =
+                      msg.call_status === 'missed' ||
+                      msg.call_status === 'rejected' ||
+                      msg.call_status === 'declined' ||
+                      msg.call_status === 'failed' ||
+                      msg.content?.toLowerCase().includes('missed');
+                    const isVideo =
+                      msg.call_type === 'video' || msg.content?.toLowerCase().includes('video');
+                    const isMe = msg.sender_id === profile?.id;
+
+                    return (
+                      <div
+                        key={msg.id}
+                        id={`msg-${msg.id}`}
+                        className="my-3 flex flex-col items-center justify-center w-full select-none transition-all"
+                      >
+                        <div
+                          className={`px-4 py-3 rounded-2xl border flex items-center gap-3.5 shadow-sm max-w-sm sm:max-w-md w-full sm:w-auto transition-all ${
+                            isMissed
+                              ? 'bg-[#181112]/95 border-red-500/30 text-[#fca5a5]'
+                              : 'bg-[#18181b]/95 border-[#27272a] text-[#e5e2e1]'
+                          }`}
+                        >
+                          {/* Call Icon Badge */}
+                          <div
+                            className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 border ${
+                              isMissed
+                                ? 'bg-red-500/15 border-red-500/40 text-red-400'
+                                : 'bg-emerald-500/15 border-emerald-500/40 text-emerald-400'
+                            }`}
+                          >
+                            {isVideo ? (
+                              isMissed ? <VideoOff className="w-5 h-5" /> : <Video className="w-5 h-5" />
+                            ) : (
+                              isMissed ? <PhoneMissed className="w-5 h-5" /> : <PhoneCall className="w-5 h-5" />
+                            )}
+                          </div>
+
+                          {/* Call Summary Info */}
+                          <div className="flex-1 min-w-0 pr-1">
+                            <p
+                              className={`text-xs font-bold leading-tight truncate ${
+                                isMissed ? 'text-red-400' : 'text-[#f4f4f5]'
+                              }`}
+                            >
+                              {isMissed
+                                ? isMe
+                                  ? isVideo
+                                    ? 'Outgoing Missed Video Call'
+                                    : 'Outgoing Missed Audio Call'
+                                  : isVideo
+                                  ? 'Missed Video Call'
+                                  : 'Missed Audio Call'
+                                : msg.content || (isVideo ? 'Video Call' : 'Audio Call')}
+                            </p>
+                            <div className="flex items-center gap-1.5 text-[11px] text-[#89919d] mt-0.5">
+                              {isMissed ? (
+                                <span>{isMe ? 'No answer' : 'Unanswered'}</span>
+                              ) : msg.duration_seconds && msg.duration_seconds > 0 ? (
+                                <span>
+                                  {Math.floor(msg.duration_seconds / 60)}m{' '}
+                                  {(msg.duration_seconds % 60).toString().padStart(2, '0')}s
+                                </span>
+                              ) : (
+                                <span>{isVideo ? 'Video call' : 'Audio call'}</span>
+                              )}
+                              <span>•</span>
+                              <span>{formatRelativeTime(msg.created_at)}</span>
+                            </div>
+                          </div>
+
+                          {/* Call Back Button */}
+                          {isMissed && (
+                            <button
+                              type="button"
+                              onClick={() => handleStartCall(isVideo ? 'video' : 'audio')}
+                              className="px-3 py-1.5 bg-red-500/15 hover:bg-red-500/25 active:scale-95 text-red-300 hover:text-white border border-red-500/30 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ml-auto"
+                              title={`Call back with ${isVideo ? 'video' : 'audio'}`}
+                            >
+                              {isVideo ? <Video className="w-3.5 h-3.5" /> : <Phone className="w-3.5 h-3.5" />}
+                              <span>Call Back</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  }
+
                   const isMe = msg.sender_id === profile?.id;
                   const isHighlighted = highlightedMessageId === msg.id;
                   const isMenuOpen = activeMenuMessageId === msg.id;
@@ -1700,6 +1797,12 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
           incomingOffer={activeCall.incomingOffer}
           callId={activeCall.callId}
           onEndCall={handleEndActiveCall}
+          onLogCall={(callLog) => {
+            setMessages((prev) => {
+              if (prev.some((m) => m.id === callLog.id)) return prev;
+              return [...prev, callLog];
+            });
+          }}
         />
       )}
     </main>
