@@ -1,5 +1,6 @@
 import React from 'react';
 import { useAuth } from '../../context/AuthContext';
+import { usePWA } from '../../context/PWAContext';
 import { ActiveTab } from '../../types';
 import {
   Home,
@@ -10,6 +11,7 @@ import {
   Settings,
   LogOut,
   CheckCircle2,
+  Download,
 } from 'lucide-react';
 
 interface DesktopSidebarProps {
@@ -34,6 +36,7 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
   hasUnreadNotifications = false,
 }) => {
   const { profile, signOut } = useAuth();
+  const { isInstallable, isInstalled, installApp } = usePWA();
 
   const showMessagesRedDot = hasUnreadMessages || unreadMessagesCount > 0;
   const showNotificationsRedDot = hasUnreadNotifications || unreadNotificationsCount > 0;
@@ -142,6 +145,18 @@ export const DesktopSidebar: React.FC<DesktopSidebarProps> = ({
 
       {/* Footer / User Profile & Settings */}
       <div className="mt-auto flex flex-col gap-1.5 pt-4 border-t border-[#201f1f]">
+        {/* Subtle PWA Install Button */}
+        {isInstallable && !isInstalled && (
+          <button
+            id="btn-sidebar-pwa-install"
+            onClick={() => installApp()}
+            className="flex items-center gap-3 py-2 px-3 text-[#38bdf8] hover:text-white hover:bg-[#1d9bf0]/15 rounded-full text-xs font-semibold transition-all cursor-pointer border border-[#1d9bf0]/30 shadow-sm"
+          >
+            <Download className="w-4 h-4 text-[#38bdf8]" />
+            <span>Install Void App</span>
+          </button>
+        )}
+
         <button
           onClick={onOpenSettings}
           className="flex items-center gap-3 py-2 px-3 text-[#89919d] hover:text-[#e5e2e1] hover:bg-[#131313] rounded-full text-xs font-medium transition-colors cursor-pointer"

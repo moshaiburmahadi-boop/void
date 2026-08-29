@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { FollowProvider } from './context/FollowContext';
+import { PWAProvider } from './context/PWAContext';
 import { supabase, isSupabaseConfigured } from './lib/supabase';
 import { ActiveTab, Post, Profile } from './types';
 import { INITIAL_POSTS } from './data/mockData';
@@ -17,6 +18,7 @@ import { PostComposeModal } from './components/Feed/PostComposeModal';
 import { SQLModal } from './components/SQLModal';
 import { SettingsModal } from './components/SettingsModal';
 import { AuthModal } from './components/Auth/AuthModal';
+import { OfflineBanner } from './components/PWA/OfflineBanner';
 import { Loader2 } from 'lucide-react';
 
 const MainApp: React.FC = () => {
@@ -244,6 +246,9 @@ const MainApp: React.FC = () => {
           onClose={() => setIsSettingsModalOpen(false)}
           onOpenSQLHelper={() => setIsSQLModalOpen(true)}
         />
+
+        {/* Offline & Update Status Banner */}
+        <OfflineBanner />
       </div>
     </div>
   );
@@ -251,10 +256,12 @@ const MainApp: React.FC = () => {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <FollowProvider>
-        <MainApp />
-      </FollowProvider>
-    </AuthProvider>
+    <PWAProvider>
+      <AuthProvider>
+        <FollowProvider>
+          <MainApp />
+        </FollowProvider>
+      </AuthProvider>
+    </PWAProvider>
   );
 }

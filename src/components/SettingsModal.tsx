@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { usePWA } from '../context/PWAContext';
 import {
   X,
   User,
@@ -11,6 +12,9 @@ import {
   Lock,
   Moon,
   Sparkles,
+  Download,
+  Smartphone,
+  CheckCircle2,
 } from 'lucide-react';
 
 interface SettingsModalProps {
@@ -24,6 +28,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onClose,
 }) => {
   const { profile, signOut } = useAuth();
+  const { isInstallable, isInstalled, installApp } = usePWA();
   const [activeTab, setActiveTab] = useState<'account' | 'privacy' | 'notifications' | 'display'>('account');
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [directMessagesFromAnyone, setDirectMessagesFromAnyone] = useState(true);
@@ -258,6 +263,46 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     Active
                   </span>
                 </div>
+              </div>
+
+              {/* Progressive Web App Status & Install */}
+              <div className="p-4 bg-[#18181b] border border-[#27272a] rounded-2xl space-y-3">
+                <h4 className="text-xs font-bold text-[#89919d] uppercase tracking-wider flex items-center gap-1.5">
+                  <Smartphone className="w-3.5 h-3.5 text-[#1d9bf0]" /> Progressive Web App
+                </h4>
+                <p className="text-xs text-[#89919d]">
+                  Install Void on your device for full screen, offline app shell, and quick home screen access.
+                </p>
+                {isInstalled ? (
+                  <div className="p-3 bg-black border border-emerald-500/30 rounded-xl flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                      <span className="text-xs font-semibold text-emerald-300">Installed in Standalone Mode</span>
+                    </div>
+                  </div>
+                ) : isInstallable ? (
+                  <div className="p-3 bg-black border border-[#27272a] rounded-xl flex items-center justify-between">
+                    <div>
+                      <span className="text-xs font-bold text-[#e5e2e1]">Ready to Install</span>
+                      <p className="text-[10px] text-[#89919d]">Add Void directly to your home screen</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => installApp()}
+                      className="px-3 py-1.5 bg-[#1d9bf0] hover:bg-[#1a8cd8] text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-md shadow-[#1d9bf0]/20"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      Install
+                    </button>
+                  </div>
+                ) : (
+                  <div className="p-3 bg-black border border-[#27272a] rounded-xl flex items-center justify-between">
+                    <span className="text-xs text-[#89919d]">Web App Active</span>
+                    <span className="text-[10px] bg-[#27272a] text-[#89919d] px-2 py-0.5 rounded-full font-medium">
+                      Browser Mode
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
           )}

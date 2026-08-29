@@ -1,7 +1,7 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-export const DEFAULT_SUPABASE_URL = 'https://oqqmwsfavylcyqtqtwfg.supabase.co';
-export const DEFAULT_SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9xcW13c2ZhdnlsY3lxdHF0d2ZnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODczMDUwMjcsImV4cCI6MjEwMjg4MTAyN30.s7Ki9HnhPukAZ2CqpFvFR3GjRqwhE6NKi2PqsHkmRmk';
+export const DEFAULT_SUPABASE_URL = 'https://immhnisokolbwgcnkfqj.supabase.co';
+export const DEFAULT_SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImltbWhuaXNva29sYndnY25rZnFqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODgwMTUwNzcsImV4cCI6MjEwMzU5MTA3N30.R5XNVHBc7LTeDJYfpBSBL3kVGXrGnB8JgzEzzA5NbA4';
 
 // Clean and normalize Supabase URL
 export function sanitizeSupabaseUrl(rawUrl?: string | null): string {
@@ -237,6 +237,13 @@ CREATE TRIGGER on_auth_user_created
   FOR EACH ROW EXECUTE PROCEDURE public.handle_new_user();
 
 -- Enable Realtime
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime') THEN
+    CREATE PUBLICATION supabase_realtime;
+  END IF;
+END $$;
+
 ALTER PUBLICATION supabase_realtime ADD TABLE public.messages;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.message_reactions;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.posts;
@@ -244,4 +251,28 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.likes;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.comments;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.follows;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.notifications;
+
+-- Storage Buckets Configuration (Avatars, Posts, Media)
+INSERT INTO storage.buckets (id, name, public)
+VALUES 
+  ('avatars', 'avatars', true),
+  ('posts', 'posts', true),
+  ('chat-media', 'chat-media', true)
+ON CONFLICT (id) DO UPDATE SET public = true;
+
+-- Storage Policies
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies WHERE schemaname = 'storage' AND tablename = 'objects' AND policyname = 'Public Access to Media'
+  ) THEN
+    CREATE POLICY "Public Access to Media" ON storage.objects FOR SELECT USING (bucket_id IN ('avatars', 'posts', 'chat-media'));
+  END IF;
+  
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies WHERE schemaname = 'storage' AND tablename = 'objects' AND policyname = 'Authenticated Uploads'
+  ) THEN
+    CREATE POLICY "Authenticated Uploads" ON storage.objects FOR INSERT WITH CHECK (auth.role() = 'authenticated');
+  END IF;
+END $$;
 `;
