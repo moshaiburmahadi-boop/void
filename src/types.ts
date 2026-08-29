@@ -100,3 +100,70 @@ export interface Notification {
 }
 
 export type ActiveTab = 'feed' | 'messages' | 'compose' | 'notifications' | 'profile' | 'explore';
+
+export type CallSessionStatus =
+  | 'calling'
+  | 'ringing'
+  | 'accepted'
+  | 'rejected'
+  | 'ended'
+  | 'missed'
+  | 'cancelled';
+
+export interface CallSession {
+  id: string;
+  caller_id: string;
+  receiver_id: string;
+  call_type: 'audio' | 'video';
+  status: CallSessionStatus;
+  offer?: any;
+  answer?: any;
+  duration_seconds?: number | null;
+  created_at: string;
+  updated_at?: string;
+  caller_profile?: Profile | null;
+  receiver_profile?: Profile | null;
+}
+
+export interface PushSubscriptionRecord {
+  id?: string;
+  user_id: string;
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+  user_agent?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface PushNotificationPayload {
+  type: 'message' | 'incoming_call' | 'social' | 'call_rejected' | 'call_ended';
+  title: string;
+  body: string;
+  icon?: string;
+  badge?: string;
+  tag?: string;
+  data: {
+    type: 'message' | 'incoming_call' | 'social' | 'call_rejected' | 'call_ended';
+    senderId?: string;
+    senderName?: string;
+    senderAvatar?: string;
+    receiverId?: string;
+    conversationId?: string;
+    callId?: string;
+    callType?: 'audio' | 'video';
+    offer?: any;
+    notificationId?: string;
+    url: string;
+    timestamp?: number;
+  };
+  actions?: Array<{
+    action: string;
+    title: string;
+    icon?: string;
+  }>;
+  requireInteraction?: boolean;
+  renotify?: boolean;
+  vibrate?: number[];
+  silent?: boolean;
+}

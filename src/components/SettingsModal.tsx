@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { usePWA } from '../context/PWAContext';
 import {
@@ -15,7 +15,16 @@ import {
   Download,
   Smartphone,
   CheckCircle2,
+  Send,
+  Loader2,
+  Radio,
 } from 'lucide-react';
+import {
+  subscribeUserToPush,
+  unsubscribeUserFromPush,
+  dispatchPushNotification,
+  getNotificationPermission,
+} from '../utils/pushNotifications';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -34,8 +43,65 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [directMessagesFromAnyone, setDirectMessagesFromAnyone] = useState(true);
   const [soundEffects, setSoundEffects] = useState(true);
   const [savedToast, setSavedToast] = useState(false);
+  const [pushStatus, setPushStatus] = useState<NotificationPermission>('default');
+  const [isPushSubscribed, setIsPushSubscribed] = useState(false);
+  const [isPushLoading, setIsPushLoading] = useState(false);
+  const [testNotificationSent, setTestNotificationSent] = useState(false);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      setPushStatus(Notification.permission);
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.ready.then((registration) => {
+          registration.pushManager.getSubscription().then((sub) => {
+            setIsPushSubscribed(Boolean(sub));
+          });
+        });
+      }
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
+
+  const handleTogglePush = async () => {
+    if (!profile) return;
+    setIsPushLoading(true);
+    try {
+      if (isPushSubscribed) {
+        const success = await unsubscribeUserFromPush(profile.id);
+        if (success) {
+          setIsPushSubscribed(false);
+          const perm = getNotificationPermission();
+          if (perm !== 'unsupported') setPushStatus(perm);
+        }
+      } else {
+        const sub = await subscribeUserToPush(profile.id);
+        if (sub) {
+          setIsPushSubscribed(true);
+          const perm = getNotificationPermission();
+          if (perm !== 'unsupported') setPushStatus(perm);
+        }
+      }
+    } catch (e) {
+      console.warn('Push toggle error:', e);
+    } finally {
+      setIsPushLoading(false);
+    }
+  };
+
+  const handleSendTestPush = async () => {
+    if (!profile) return;
+    setTestNotificationSent(true);
+    await dispatchPushNotification({
+      targetUserId: profile.id,
+      type: 'message',
+      title: 'Void Test Alert',
+      body: 'Background notifications & incoming call ringing are actively functioning!',
+      icon: profile.avatar_url || '/icon-192.png',
+      data: { url: '/' },
+    });
+    setTimeout(() => setTestNotificationSent(false), 3000);
+  };
 
   const handleSavePreferences = () => {
     setSavedToast(true);
@@ -208,6 +274,58 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           {/* Notifications Tab */}
           {activeTab === 'notifications' && (
             <div className="space-y-4">
+              {/* Web Push & Call Alerts */}
+              <div className="p-4 bg-[#18181b] border border-[#27272a] rounded-2xl space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold text-[#89919d] uppercase tracking-wider flex items-center gap-1.5">
+                    <Radio className="w-3.5 h-3.5 text-[#1d9bf0]" /> Background Web Push & Calls
+                  </h4>
+                  <span
+                    className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                      pushStatus === 'granted'
+                        ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                        : pushStatus === 'denied'
+                        ? 'bg-red-500/20 text-red-400 border border-red-500/30'
+                        : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                    }`}
+                  >
+                    {pushStatus === 'granted' ? 'Enabled' : pushStatus === 'denied' ? 'Blocked' : 'Default'}
+                  </span>
+                </div>
+
+                <p className="text-xs text-[#89919d] leading-relaxed">
+                  Receive real-time alerts for incoming voice/video calls and direct messages even when Void is minimized, running in another tab, or closed.
+                </p>
+
+                <div className="flex flex-col sm:flex-row gap-2 pt-2 border-t border-[#27272a]">
+                  <button
+                    onClick={handleTogglePush}
+                    disabled={isPushLoading}
+                    className={`flex-1 py-2.5 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                      isPushSubscribed
+                        ? 'bg-[#27272a] text-[#e5e2e1] hover:bg-[#3f3f46]'
+                        : 'bg-[#1d9bf0] text-white hover:bg-[#1a8cd8]'
+                    }`}
+                  >
+                    {isPushLoading ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Bell className="w-3.5 h-3.5" />
+                    )}
+                    {isPushSubscribed ? 'Disable Push Notifications' : 'Enable Background Push'}
+                  </button>
+
+                  <button
+                    onClick={handleSendTestPush}
+                    disabled={testNotificationSent}
+                    className="py-2.5 px-4 rounded-xl text-xs font-bold bg-white/5 hover:bg-white/10 text-white border border-[#27272a] transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    {testNotificationSent ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Send className="w-3.5 h-3.5" />}
+                    {testNotificationSent ? 'Notification Dispatched!' : 'Send Test Notification'}
+                  </button>
+                </div>
+              </div>
+
               <div className="p-4 bg-[#18181b] border border-[#27272a] rounded-2xl space-y-4">
                 <h4 className="text-xs font-bold text-[#89919d] uppercase tracking-wider">
                   Notification Preferences
@@ -230,8 +348,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
                 <label className="flex items-center justify-between cursor-pointer pt-2 border-t border-[#27272a]">
                   <div>
-                    <p className="text-sm font-semibold text-[#e5e2e1]">Sound effects</p>
-                    <p className="text-xs text-[#89919d]">Play subtle sound on new direct messages</p>
+                    <p className="text-sm font-semibold text-[#e5e2e1]">Sound effects & Ringing</p>
+                    <p className="text-xs text-[#89919d]">Play audio ringtones on incoming calls and direct messages</p>
                   </div>
                   <input
                     type="checkbox"

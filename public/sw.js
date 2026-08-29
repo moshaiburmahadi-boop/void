@@ -152,3 +152,177 @@ self.addEventListener('message', (event) => {
     self.skipWaiting();
   }
 });
+
+// 5. Push event: handle background Web Push notifications (Messages, Calls, Social)
+self.addEventListener('push', (event) => {
+  if (!event.data) {
+    console.warn('[PWA SW] Push event received with no payload data.');
+    return;
+  }
+
+  let payload;
+  try {
+    payload = event.data.json();
+  } catch (err) {
+    payload = {
+      title: 'Void Notification',
+      body: event.data.text(),
+      data: { url: '/' },
+    };
+  }
+
+  const {
+    type = 'message',
+    title = 'Void',
+    body = '',
+    icon = '/icon-192.png',
+    badge = '/icon-192.png',
+    tag,
+    data = {},
+    actions = [],
+    requireInteraction = false,
+    renotify = false,
+    vibrate,
+    silent = false,
+  } = payload;
+
+  // Handle call ended/cancelled while ringing: auto-dismiss ringing notification
+  if (type === 'call_ended' || type === 'call_rejected') {
+    const callId = data?.callId;
+    if (callId) {
+      event.waitUntil(
+        self.registration.getNotifications({ tag: `call_${callId}` }).then((notifications) => {
+          notifications.forEach((n) => n.close());
+        })
+      );
+      return;
+    }
+  }
+
+  // Determine configuration based on notification type
+  let notificationOptions = {
+    body,
+    icon: icon || '/icon-192.png',
+    badge: badge || '/icon-192.png',
+    tag: tag || (type === 'incoming_call' ? `call_${data.callId || 'unknown'}` : `void_${Date.now()}`),
+    data: {
+      ...data,
+      type,
+      url: data.url || (type === 'incoming_call' ? `/call/${data.callId}` : '/'),
+    },
+    requireInteraction: type === 'incoming_call' ? true : requireInteraction,
+    renotify: type === 'incoming_call' ? true : renotify,
+    vibrate: vibrate || (type === 'incoming_call' ? [300, 150, 300, 150, 300, 150, 600] : [200, 100, 200]),
+    silent,
+    actions: actions.length > 0
+      ? actions
+      : type === 'incoming_call'
+      ? [
+          { action: 'accept-call', title: 'Receive', icon: '/icon-192.png' },
+          { action: 'reject-call', title: 'Reject', icon: '/icon-192.png' },
+        ]
+      : [],
+  };
+
+  const notificationPromise = self.registration.showNotification(title, notificationOptions);
+  event.waitUntil(notificationPromise);
+});
+
+// 6. Notification Click event: handle interactive notification actions (Accept, Reject, Open Message, Open Route)
+self.addEventListener('notificationclick', (event) => {
+  const { action, notification } = event;
+  const notifData = notification.data || {};
+  const notificationType = notifData.type;
+
+  // Always close notification after user acts
+  notification.close();
+
+  // Action 1: Reject Incoming Call in Background
+  if (action === 'reject-call') {
+    const callId = notifData.callId;
+    const callerId = notifData.senderId || notifData.callerId;
+    const receiverId = notifData.receiverId;
+
+    event.waitUntil(
+      (async () => {
+        try {
+          // Notify backend/signaling of call rejection
+          await fetch('/api/calls/reject', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              callId,
+              callerId,
+              receiverId,
+              reason: 'user_declined_from_notification',
+            }),
+          });
+        } catch (err) {
+          console.warn('[PWA SW] Reject call fetch error:', err);
+        }
+
+        // Notify any active clients that call was rejected
+        const windowClients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+        windowClients.forEach((client) => {
+          client.postMessage({
+            type: 'CALL_REJECTED_BG',
+            callId,
+            action: 'reject-call',
+          });
+        });
+      })()
+    );
+    return;
+  }
+
+  // Action 2: Accept Call or Default Notification Click (Open / Focus App)
+  let targetUrl = notifData.url || '/';
+  if (action === 'accept-call') {
+    // Append autoAccept query or hash to immediately connect call upon open
+    const separator = targetUrl.includes('?') ? '&' : '?';
+    targetUrl = `${targetUrl}${separator}autoAccept=true&action=accept`;
+  }
+
+  event.waitUntil(
+    (async () => {
+      const windowClients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+
+      // Look for an existing client window to focus
+      for (const client of windowClients) {
+        // Send message to the client to switch tabs or start call
+        client.postMessage({
+          type: 'NOTIFICATION_CLICK',
+          action,
+          data: notifData,
+          url: targetUrl,
+        });
+
+        if ('focus' in client) {
+          await client.focus();
+          return client.navigate(targetUrl);
+        }
+      }
+
+      // If no window is currently open, open a new browser window/PWA client
+      if (self.clients.openWindow) {
+        return self.clients.openWindow(targetUrl);
+      }
+    })()
+  );
+});
+
+// 7. Notification Close event: handle dismissal
+self.addEventListener('notificationclose', (event) => {
+  const notifData = event.notification.data || {};
+  if (notifData.type === 'incoming_call' && notifData.callId) {
+    // Notify clients of notification dismissal if needed
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+      clients.forEach((client) => {
+        client.postMessage({
+          type: 'NOTIFICATION_DISMISSED',
+          callId: notifData.callId,
+        });
+      });
+    });
+  }
+});

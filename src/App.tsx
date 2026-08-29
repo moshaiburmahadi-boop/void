@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { FollowProvider } from './context/FollowContext';
+import { CallProvider } from './context/CallContext';
 import { PWAProvider } from './context/PWAContext';
 import { supabase, isSupabaseConfigured } from './lib/supabase';
 import { ActiveTab, Post, Profile } from './types';
@@ -259,7 +260,9 @@ export default function App() {
     <PWAProvider>
       <AuthProvider>
         <FollowProvider>
-          <MainApp />
+          <CallProvider>
+            <MainApp />
+          </CallProvider>
         </FollowProvider>
       </AuthProvider>
     </PWAProvider>

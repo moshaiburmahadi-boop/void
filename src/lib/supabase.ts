@@ -171,6 +171,39 @@ CREATE TABLE IF NOT EXISTS public.notifications (
   created_at TIMESTAMPTZ DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
 );
 
+-- 9. Push Subscriptions Table (Web Push / Background Notifications)
+CREATE TABLE IF NOT EXISTS public.push_subscriptions (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE NOT NULL,
+  endpoint TEXT UNIQUE NOT NULL,
+  p256dh TEXT NOT NULL,
+  auth TEXT NOT NULL,
+  user_agent TEXT,
+  created_at TIMESTAMPTZ DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_push_subs_user ON public.push_subscriptions(user_id);
+CREATE INDEX IF NOT EXISTS idx_push_subs_endpoint ON public.push_subscriptions(endpoint);
+
+-- 10. Call Sessions Table (Global Voice & Video Signaling / Background State)
+CREATE TABLE IF NOT EXISTS public.call_sessions (
+  id TEXT PRIMARY KEY,
+  caller_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE NOT NULL,
+  receiver_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE NOT NULL,
+  call_type TEXT NOT NULL DEFAULT 'audio' CHECK (call_type IN ('audio', 'video')),
+  status TEXT NOT NULL DEFAULT 'calling' CHECK (status IN ('calling', 'ringing', 'accepted', 'rejected', 'ended', 'missed', 'cancelled')),
+  offer JSONB,
+  answer JSONB,
+  duration_seconds INTEGER DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_call_sessions_caller ON public.call_sessions(caller_id);
+CREATE INDEX IF NOT EXISTS idx_call_sessions_receiver ON public.call_sessions(receiver_id);
+CREATE INDEX IF NOT EXISTS idx_call_sessions_status ON public.call_sessions(status);
+
 -- Row Level Security (RLS)
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.posts ENABLE ROW LEVEL SECURITY;
@@ -180,6 +213,8 @@ ALTER TABLE public.follows ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.message_reactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.push_subscriptions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.call_sessions ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Public profiles are viewable by everyone." ON public.profiles FOR SELECT USING (true);
 CREATE POLICY "Users can insert their own profile." ON public.profiles FOR INSERT WITH CHECK (auth.uid() = id);
@@ -213,6 +248,13 @@ CREATE POLICY "Users can remove their reactions." ON public.message_reactions FO
 
 CREATE POLICY "Users can view their notifications." ON public.notifications FOR SELECT USING (auth.uid() = user_id);
 CREATE POLICY "Authenticated users can create notifications." ON public.notifications FOR INSERT WITH CHECK (auth.role() = 'authenticated');
+
+CREATE POLICY "Users can manage their own push subscriptions." ON public.push_subscriptions FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Service role can access push subscriptions." ON public.push_subscriptions FOR SELECT USING (true);
+
+CREATE POLICY "Users can view their call sessions." ON public.call_sessions FOR SELECT USING (auth.uid() = caller_id OR auth.uid() = receiver_id);
+CREATE POLICY "Users can initiate call sessions." ON public.call_sessions FOR INSERT WITH CHECK (auth.uid() = caller_id);
+CREATE POLICY "Users can update their call sessions." ON public.call_sessions FOR UPDATE USING (auth.uid() = caller_id OR auth.uid() = receiver_id);
 
 -- Trigger to automatically create profile for new auth.users
 CREATE OR REPLACE FUNCTION public.handle_new_user()
@@ -251,6 +293,8 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.likes;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.comments;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.follows;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.notifications;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.call_sessions;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.push_subscriptions;
 
 -- Storage Buckets Configuration (Avatars, Posts, Media)
 INSERT INTO storage.buckets (id, name, public)

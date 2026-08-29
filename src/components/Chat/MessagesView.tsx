@@ -28,8 +28,8 @@ import {
   UserPlus,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { CallModal } from './CallModal';
-import { IncomingCallModal } from './IncomingCallModal';
+import { useCall } from '../../context/CallContext';
+import { dispatchPushNotification } from '../../utils/pushNotifications';
 import { formatRelativeTime } from '../../utils/date';
 
 const QUICK_EMOJIS = ['❤️', '😂', '👍', '😮', '😢', '🔥'];
@@ -48,6 +48,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
 }) => {
   const { profile } = useAuth();
   const { isFollowing, followingMap } = useFollow();
+  const { startCall } = useCall();
   const [conversations, setConversations] = useState<Profile[]>([]);
   const [activePartner, setActivePartner] = useState<Profile | null>(initialPartner || null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -62,22 +63,6 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
 
   // Editing State
   const [editingMessage, setEditingMessage] = useState<Message | null>(null);
-
-  // 1-on-1 Call State
-  const [activeCall, setActiveCall] = useState<{
-    isCaller: boolean;
-    callType: 'audio' | 'video';
-    remoteUser: Profile;
-    incomingOffer?: any;
-    callId?: string;
-  } | null>(null);
-
-  const [incomingCall, setIncomingCall] = useState<{
-    caller: Profile;
-    callType: 'audio' | 'video';
-    offer: any;
-    callId: string;
-  } | null>(null);
 
   // Inform parent of mobile chat state for hiding/showing bottom nav
   useEffect(() => {
@@ -579,83 +564,10 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
     }
   }, [activePartner?.id, profile?.id]);
 
-  // Global listener for incoming calls targeting current user
-  useEffect(() => {
-    if (!profile?.id || !isSupabaseConfigured) return;
-
-    const myCallChannel = supabase.channel(`call_room_${profile.id}`);
-
-    myCallChannel
-      .on('broadcast', { event: 'call-request' }, (payload) => {
-        const { senderProfile, callType, offer, callId } = payload?.payload || {};
-        if (senderProfile && offer && callId) {
-          // If already in call, auto-reject with busy
-          if (activeCall) {
-            const rejectChannel = supabase.channel(`call_room_${senderProfile.id}`);
-            rejectChannel.send({
-              type: 'broadcast',
-              event: 'call-rejected',
-              payload: { callId },
-            });
-            return;
-          }
-
-          setIncomingCall({
-            caller: senderProfile,
-            callType: callType || 'video',
-            offer,
-            callId,
-          });
-        }
-      })
-      .on('broadcast', { event: 'call-ended' }, (payload) => {
-        const { callId } = payload?.payload || {};
-        if (incomingCall && incomingCall.callId === callId) {
-          setIncomingCall(null);
-        }
-      })
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(myCallChannel);
-    };
-  }, [profile?.id, activeCall, incomingCall]);
-
   // Call Handlers
   const handleStartCall = (type: 'audio' | 'video') => {
     if (!activePartner || !profile) return;
-    setActiveCall({
-      isCaller: true,
-      callType: type,
-      remoteUser: activePartner,
-    });
-  };
-
-  const handleAcceptIncomingCall = () => {
-    if (!incomingCall || !profile) return;
-    setActiveCall({
-      isCaller: false,
-      callType: incomingCall.callType,
-      remoteUser: incomingCall.caller,
-      incomingOffer: incomingCall.offer,
-      callId: incomingCall.callId,
-    });
-    setIncomingCall(null);
-  };
-
-  const handleDeclineIncomingCall = () => {
-    if (!incomingCall) return;
-    const targetChannel = supabase.channel(`call_room_${incomingCall.caller.id}`);
-    targetChannel.send({
-      type: 'broadcast',
-      event: 'call-rejected',
-      payload: { callId: incomingCall.callId },
-    });
-    setIncomingCall(null);
-  };
-
-  const handleEndActiveCall = () => {
-    setActiveCall(null);
+    startCall(activePartner, type);
   };
 
   // Emit typing broadcast event with 2s debounce
@@ -937,6 +849,24 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
             )
           );
         }
+
+        // Dispatch background Web Push notification to recipient
+        dispatchPushNotification({
+          targetUserId: activePartner.id,
+          type: 'message',
+          title: profile.display_name || profile.username,
+          body: content.length > 80 ? `${content.substring(0, 80)}...` : content,
+          icon: profile.avatar_url || '/icon-192.png',
+          tag: `msg_${profile.id}`,
+          data: {
+            type: 'message',
+            senderId: profile.id,
+            senderName: profile.display_name || profile.username,
+            senderAvatar: profile.avatar_url,
+            receiverId: activePartner.id,
+            url: `/messages`,
+          },
+        });
       } catch (err) {
         console.warn('Failed to send message to Supabase:', err);
       }
@@ -1774,36 +1704,6 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
             </div>
           </div>
         </div>
-      )}
-      {/* Incoming Call Ringing Dialog */}
-      {incomingCall && (
-        <IncomingCallModal
-          isOpen={Boolean(incomingCall)}
-          caller={incomingCall.caller}
-          callType={incomingCall.callType}
-          onAccept={handleAcceptIncomingCall}
-          onDecline={handleDeclineIncomingCall}
-        />
-      )}
-
-      {/* Active Fullscreen WebRTC Call Modal */}
-      {activeCall && profile && (
-        <CallModal
-          isOpen={Boolean(activeCall)}
-          isCaller={activeCall.isCaller}
-          callType={activeCall.callType}
-          currentUser={profile}
-          remoteUser={activeCall.remoteUser}
-          incomingOffer={activeCall.incomingOffer}
-          callId={activeCall.callId}
-          onEndCall={handleEndActiveCall}
-          onLogCall={(callLog) => {
-            setMessages((prev) => {
-              if (prev.some((m) => m.id === callLog.id)) return prev;
-              return [...prev, callLog];
-            });
-          }}
-        />
       )}
     </main>
   );
