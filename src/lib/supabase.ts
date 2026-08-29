@@ -65,6 +65,63 @@ export const clearSupabaseCredentials = () => {
   window.location.reload();
 };
 
+// Upload Profile Media (Avatar, Cover Photo) to Supabase Storage with graceful fallback
+export async function uploadProfileAsset(
+  file: File,
+  bucket: 'avatars' | 'posts' | 'chat-media' = 'avatars',
+  userId: string,
+  prefix: 'avatar' | 'cover' = 'avatar'
+): Promise<{ url: string | null; error: Error | null }> {
+  if (!isSupabaseConfigured) {
+    // Return a local preview object URL for immediate responsiveness in demo mode
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        resolve({ url: reader.result as string, error: null });
+      };
+      reader.onerror = () => {
+        resolve({ url: null, error: new Error('Failed to read file') });
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  try {
+    const fileExt = file.name.split('.').pop()?.toLowerCase() || 'jpg';
+    const fileName = `${userId}/${prefix}_${Date.now()}.${fileExt}`;
+
+    // Upload to Supabase Storage
+    const { data: uploadData, error: uploadError } = await supabase.storage
+      .from(bucket)
+      .upload(fileName, file, {
+        cacheControl: '3600',
+        upsert: true,
+      });
+
+    if (uploadError) {
+      console.warn(`Supabase Storage upload warning (${bucket}):`, uploadError.message);
+      // If bucket is not accessible or storage rule failed, provide local data URL fallback so user is never blocked
+      return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          resolve({ url: reader.result as string, error: null });
+        };
+        reader.onerror = () => {
+          resolve({ url: null, error: uploadError });
+        };
+        reader.readAsDataURL(file);
+      });
+    }
+
+    // Get public URL
+    const { data } = supabase.storage.from(bucket).getPublicUrl(uploadData.path);
+    return { url: data.publicUrl, error: null };
+  } catch (err: any) {
+    console.error('Error during profile asset upload:', err);
+    return { url: null, error: err };
+  }
+}
+
 export const SCHEMA_SQL = `-- VOID Complete Database Schema (Supabase)
 -- 1. Profiles Table (Linked to auth.users)
 CREATE TABLE IF NOT EXISTS public.profiles (
@@ -77,8 +134,28 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   website TEXT,
   location TEXT,
   verified BOOLEAN DEFAULT FALSE,
+  date_of_birth DATE,
+  birthday_visibility TEXT DEFAULT 'only_me',
+  birthday_display TEXT DEFAULT 'month_day',
+  gender TEXT DEFAULT 'prefer_not_to_say',
+  gender_custom TEXT,
+  gender_visibility TEXT DEFAULT 'only_me',
+  occupation TEXT,
+  education TEXT,
+  interests TEXT[] DEFAULT '{}',
   created_at TIMESTAMPTZ DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
 );
+
+-- Upgrade existing profiles table if needed:
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS date_of_birth DATE;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS birthday_visibility TEXT DEFAULT 'only_me';
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS birthday_display TEXT DEFAULT 'month_day';
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS gender TEXT DEFAULT 'prefer_not_to_say';
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS gender_custom TEXT;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS gender_visibility TEXT DEFAULT 'only_me';
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS occupation TEXT;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS education TEXT;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS interests TEXT[] DEFAULT '{}';
 
 -- 2. Posts Table
 CREATE TABLE IF NOT EXISTS public.posts (

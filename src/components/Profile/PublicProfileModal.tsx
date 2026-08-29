@@ -5,6 +5,13 @@ import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { Post, Profile } from '../../types';
 import { PostItem } from '../Feed/PostItem';
 import {
+  formatBirthday,
+  formatGender,
+  canViewField,
+  formatWebsiteDisplay,
+  sanitizeWebsiteUrl,
+} from '../../utils/profile';
+import {
   ArrowLeft,
   Calendar,
   MapPin,
@@ -15,6 +22,11 @@ import {
   UserCheck,
   Loader2,
   X,
+  Cake,
+  User as UserIcon,
+  Briefcase,
+  GraduationCap,
+  Sparkles,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -267,27 +279,65 @@ export const PublicProfileModal: React.FC<PublicProfileModalProps> = ({
                 <p className="text-sm text-[#71767b] italic mb-4">No bio provided yet.</p>
               )}
 
-              {/* Meta details */}
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-[#89919d] mb-4">
+              {/* Meta details (occupation, education, location, website, birthday, gender, joined) */}
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-[#89919d] mb-3">
+                {user.occupation && (
+                  <div className="flex items-center gap-1 text-[#e5e2e1]">
+                    <Briefcase className="w-3.5 h-3.5 text-[#1d9bf0]" />
+                    <span>{user.occupation}</span>
+                  </div>
+                )}
+
+                {user.education && (
+                  <div className="flex items-center gap-1 text-[#e5e2e1]">
+                    <GraduationCap className="w-3.5 h-3.5 text-[#1d9bf0]" />
+                    <span>{user.education}</span>
+                  </div>
+                )}
+
                 {user.location && (
                   <div className="flex items-center gap-1">
                     <MapPin className="w-3.5 h-3.5 text-[#89919d]" />
                     <span>{user.location}</span>
                   </div>
                 )}
+
                 {user.website && (
                   <div className="flex items-center gap-1">
                     <LinkIcon className="w-3.5 h-3.5 text-[#89919d]" />
                     <a
-                      href={user.website.startsWith('http') ? user.website : `https://${user.website}`}
+                      href={sanitizeWebsiteUrl(user.website)}
                       target="_blank"
                       rel="noreferrer"
                       className="text-[#1d9bf0] hover:underline truncate max-w-xs"
                     >
-                      {user.website.replace(/^https?:\/\//, '')}
+                      {formatWebsiteDisplay(user.website)}
                     </a>
                   </div>
                 )}
+
+                {/* Privacy-aware Birthday */}
+                {user.date_of_birth &&
+                  canViewField(user.birthday_visibility, isSelf, isFollowed) &&
+                  user.birthday_display !== 'hidden' && (
+                    <div className="flex items-center gap-1">
+                      <Cake className="w-3.5 h-3.5 text-[#89919d]" />
+                      <span>
+                        {formatBirthday(user.date_of_birth, user.birthday_display || 'month_day')}
+                      </span>
+                    </div>
+                  )}
+
+                {/* Privacy-aware Gender */}
+                {user.gender &&
+                  user.gender !== 'prefer_not_to_say' &&
+                  canViewField(user.gender_visibility, isSelf, isFollowed) && (
+                    <div className="flex items-center gap-1">
+                      <UserIcon className="w-3.5 h-3.5 text-[#89919d]" />
+                      <span>{formatGender(user.gender, user.gender_custom)}</span>
+                    </div>
+                  )}
+
                 <div className="flex items-center gap-1">
                   <Calendar className="w-3.5 h-3.5 text-[#89919d]" />
                   <span>
@@ -295,6 +345,22 @@ export const PublicProfileModal: React.FC<PublicProfileModalProps> = ({
                   </span>
                 </div>
               </div>
+
+              {/* Interests Tags Cloud */}
+              {user.interests && user.interests.length > 0 && (
+                <div className="mb-4">
+                  <div className="flex flex-wrap gap-1.5">
+                    {user.interests.map((tag) => (
+                      <span
+                        key={tag}
+                        className="inline-flex items-center px-2.5 py-0.5 bg-[#18181c] text-[#1d9bf0] border border-[#27272a] rounded-full text-xs font-medium"
+                      >
+                        #{tag}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Following & Follower stats (Strict dynamic follows query) */}
               <div className="flex items-center gap-4 text-xs">

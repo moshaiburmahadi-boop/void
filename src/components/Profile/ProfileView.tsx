@@ -5,6 +5,12 @@ import { Post, Profile } from '../../types';
 import { PostItem } from '../Feed/PostItem';
 import { EditProfileModal } from '../EditProfileModal';
 import {
+  formatBirthday,
+  formatGender,
+  formatWebsiteDisplay,
+  sanitizeWebsiteUrl,
+} from '../../utils/profile';
+import {
   ArrowLeft,
   Calendar,
   MapPin,
@@ -13,6 +19,13 @@ import {
   Edit2,
   LogOut,
   X,
+  Cake,
+  User,
+  Briefcase,
+  GraduationCap,
+  Sparkles,
+  Lock,
+  Eye,
 } from 'lucide-react';
 
 interface ProfileViewProps {
@@ -151,31 +164,80 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           </p>
         )}
 
-        {/* Meta details (location, website, joined) */}
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-[#89919d] mb-4">
+        {/* Meta details (location, website, joined, occupation, education, birthday, gender) */}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-[#89919d] mb-3">
+          {profile?.occupation && (
+            <div className="flex items-center gap-1 text-[#e5e2e1]">
+              <Briefcase className="w-3.5 h-3.5 text-[#1d9bf0]" />
+              <span>{profile.occupation}</span>
+            </div>
+          )}
+
+          {profile?.education && (
+            <div className="flex items-center gap-1 text-[#e5e2e1]">
+              <GraduationCap className="w-3.5 h-3.5 text-[#1d9bf0]" />
+              <span>{profile.education}</span>
+            </div>
+          )}
+
           {profile?.location && (
             <div className="flex items-center gap-1">
-              <MapPin className="w-4 h-4 text-[#89919d]" />
+              <MapPin className="w-3.5 h-3.5 text-[#89919d]" />
               <span>{profile.location}</span>
             </div>
           )}
 
           {profile?.website && (
             <div className="flex items-center gap-1">
-              <LinkIcon className="w-4 h-4 text-[#89919d]" />
+              <LinkIcon className="w-3.5 h-3.5 text-[#89919d]" />
               <a
-                href={profile.website.startsWith('http') ? profile.website : `https://${profile.website}`}
+                href={sanitizeWebsiteUrl(profile.website)}
                 target="_blank"
                 rel="noreferrer"
                 className="text-[#1d9bf0] hover:underline"
               >
-                {profile.website.replace(/^https?:\/\//, '')}
+                {formatWebsiteDisplay(profile.website)}
               </a>
             </div>
           )}
 
+          {/* Birthday display */}
+          {profile?.date_of_birth && (
+            <div className="flex items-center gap-1">
+              <Cake className="w-3.5 h-3.5 text-[#89919d]" />
+              <span>
+                {formatBirthday(profile.date_of_birth, profile.birthday_display || 'month_day') ||
+                  'Birthday set'}
+              </span>
+              {profile.birthday_visibility === 'only_me' && (
+                <span
+                  title="Only visible to you"
+                  className="inline-flex items-center text-[10px] text-[#71767b] bg-[#1a1a1e] px-1.5 py-0.2 rounded border border-[#27272a] ml-0.5"
+                >
+                  <Lock className="w-2.5 h-2.5 mr-0.5" /> Only me
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* Gender display */}
+          {profile?.gender && profile.gender !== 'prefer_not_to_say' && (
+            <div className="flex items-center gap-1">
+              <User className="w-3.5 h-3.5 text-[#89919d]" />
+              <span>{formatGender(profile.gender, profile.gender_custom)}</span>
+              {profile.gender_visibility === 'only_me' && (
+                <span
+                  title="Only visible to you"
+                  className="inline-flex items-center text-[10px] text-[#71767b] bg-[#1a1a1e] px-1.5 py-0.2 rounded border border-[#27272a] ml-0.5"
+                >
+                  <Lock className="w-2.5 h-2.5 mr-0.5" /> Only me
+                </span>
+              )}
+            </div>
+          )}
+
           <div className="flex items-center gap-1">
-            <Calendar className="w-4 h-4 text-[#89919d]" />
+            <Calendar className="w-3.5 h-3.5 text-[#89919d]" />
             <span>
               {profile?.created_at
                 ? `Joined ${new Date(profile.created_at).toLocaleDateString('en-US', {
@@ -186,6 +248,22 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             </span>
           </div>
         </div>
+
+        {/* Interests Tags Cloud */}
+        {profile?.interests && profile.interests.length > 0 && (
+          <div className="mb-4">
+            <div className="flex flex-wrap gap-1.5">
+              {profile.interests.map((tag) => (
+                <span
+                  key={tag}
+                  className="inline-flex items-center px-2.5 py-0.5 bg-[#18181c] hover:bg-[#202026] text-[#1d9bf0] border border-[#27272a] hover:border-[#1d9bf0]/40 rounded-full text-xs font-medium transition-colors"
+                >
+                  #{tag}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Following / Followers count (Dynamic from Supabase follows table) */}
         <div className="flex gap-5 text-sm">

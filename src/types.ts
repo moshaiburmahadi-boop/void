@@ -1,3 +1,8 @@
+export type BirthdayVisibility = 'public' | 'followers' | 'only_me';
+export type BirthdayDisplay = 'full' | 'month_day' | 'age' | 'hidden';
+export type GenderOption = 'male' | 'female' | 'non_binary' | 'prefer_not_to_say' | 'custom';
+export type GenderVisibility = 'public' | 'followers' | 'only_me';
+
 export interface Profile {
   id: string;
   username: string;
@@ -11,6 +16,16 @@ export interface Profile {
   verified?: boolean;
   follower_count?: number;
   following_count?: number;
+  // Extended profile fields
+  date_of_birth?: string | null;
+  birthday_visibility?: BirthdayVisibility | null;
+  birthday_display?: BirthdayDisplay | null;
+  gender?: GenderOption | string | null;
+  gender_custom?: string | null;
+  gender_visibility?: GenderVisibility | null;
+  occupation?: string | null;
+  education?: string | null;
+  interests?: string[] | null;
 }
 
 export interface Post {
