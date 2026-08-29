@@ -192,7 +192,6 @@ const MainApp: React.FC = () => {
             <ProfileView
               posts={posts}
               onBackToFeed={() => setActiveTab('feed')}
-              onOpenSQLHelper={() => setIsSQLModalOpen(true)}
               onDeletePost={(postId) => setPosts((prev) => prev.filter((p) => p.id !== postId))}
               onViewProfile={handleViewProfile}
             />

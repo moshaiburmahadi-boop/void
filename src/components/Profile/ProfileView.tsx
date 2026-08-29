@@ -13,13 +13,11 @@ import {
   Edit2,
   LogOut,
   X,
-  Code2,
 } from 'lucide-react';
 
 interface ProfileViewProps {
   posts: Post[];
   onBackToFeed: () => void;
-  onOpenSQLHelper?: () => void;
   onDeletePost?: (postId: string) => void;
   onViewProfile?: (profile: Profile) => void;
 }
@@ -27,7 +25,6 @@ interface ProfileViewProps {
 export const ProfileView: React.FC<ProfileViewProps> = ({
   posts,
   onBackToFeed,
-  onOpenSQLHelper,
   onDeletePost,
   onViewProfile,
 }) => {
@@ -81,17 +78,6 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             </p>
           </div>
         </div>
-
-        {onOpenSQLHelper && (
-          <button
-            onClick={onOpenSQLHelper}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-[#16181c] hover:bg-[#202227] border border-[#2f3336] text-[#89919d] hover:text-[#1d9bf0] text-xs font-semibold rounded-full transition-colors"
-            title="Database Setup SQL"
-          >
-            <Code2 className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Database SQL</span>
-          </button>
-        )}
       </header>
 
       {/* Banner / Cover Photo */}

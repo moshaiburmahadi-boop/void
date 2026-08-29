@@ -16,6 +16,8 @@ interface FollowContextType {
   toggleFollow: (targetUser: Profile) => Promise<boolean>;
   followingCount: number;
   followersCount: number;
+  followingMap: Record<string, boolean>;
+  followedUserIds: string[];
 }
 
 const FollowContext = createContext<FollowContextType | undefined>(undefined);
@@ -301,6 +303,7 @@ export const FollowProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const currentFollowingCount = Object.values(followingMap).filter(Boolean).length;
   const currentFollowersCount = profile?.id ? (followersCountMap[profile.id] || 0) : 0;
+  const currentFollowedUserIds = Object.keys(followingMap).filter((id) => Boolean(followingMap[id]));
 
   return (
     <FollowContext.Provider
@@ -312,6 +315,8 @@ export const FollowProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         toggleFollow,
         followingCount: currentFollowingCount,
         followersCount: currentFollowersCount,
+        followingMap,
+        followedUserIds: currentFollowedUserIds,
       }}
     >
       {children}

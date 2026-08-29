@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useFollow } from '../../context/FollowContext';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
@@ -34,6 +34,12 @@ import { formatRelativeTime } from '../../utils/date';
 
 const QUICK_EMOJIS = ['❤️', '😂', '👍', '😮', '😢', '🔥'];
 
+export interface ConversationItem {
+  partner: Profile;
+  lastMessage: Message | null;
+  isFollowed: boolean;
+}
+
 interface MessagesViewProps {
   initialPartner?: Profile | null;
   onUnreadChange?: (count: number) => void;
@@ -47,9 +53,9 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
   onMobileChatToggle,
 }) => {
   const { profile } = useAuth();
-  const { isFollowing, followingMap } = useFollow();
+  const { isFollowing, followingMap, followedUserIds } = useFollow();
   const { startCall } = useCall();
-  const [conversations, setConversations] = useState<Profile[]>([]);
+  const [conversations, setConversations] = useState<ConversationItem[]>([]);
   const [activePartner, setActivePartner] = useState<Profile | null>(initialPartner || null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
@@ -112,13 +118,255 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
       setActivePartner(initialPartner);
       setShowMobileChat(true);
       setConversations((prev) => {
-        if (!prev.some((p) => p.id === initialPartner.id)) {
-          return [initialPartner, ...prev];
+        if (!prev.some((c) => c.partner.id === initialPartner.id)) {
+          const isUserFollowed = Boolean(
+            isFollowing(initialPartner.id) ||
+            followingMap[initialPartner.id] ||
+            followedUserIds.includes(initialPartner.id)
+          );
+          return [{ partner: initialPartner, lastMessage: null, isFollowed: isUserFollowed }, ...prev];
         }
         return prev;
       });
     }
-  }, [initialPartner]);
+  }, [initialPartner, isFollowing, followingMap, followedUserIds]);
+
+  // Load existing profiles & conversations (Union of message history + all followed users)
+  const fetchUsersAndConversations = useCallback(async () => {
+    if (!profile) return;
+
+    if (isSupabaseConfigured) {
+      try {
+        // 1. Fetch all messages involving current user to extract last message & active chat partners
+        const { data: messagesData, error: msgErr } = await supabase
+          .from('messages')
+          .select(`
+            id,
+            sender_id,
+            receiver_id,
+            content,
+            message_type,
+            call_status,
+            call_type,
+            duration_seconds,
+            is_unsent,
+            deleted_for_user_ids,
+            created_at
+          `)
+          .or(`sender_id.eq.${profile.id},receiver_id.eq.${profile.id}`)
+          .order('created_at', { ascending: false });
+
+        if (msgErr) {
+          console.warn('Error fetching messages for conversations:', msgErr);
+        }
+
+        const lastMessageByPartner: Record<string, Message> = {};
+        const partnerIdsWithHistory = new Set<string>();
+
+        (messagesData || []).forEach((m: any) => {
+          const isDeletedForMe =
+            m.is_unsent ||
+            (Array.isArray(m.deleted_for_user_ids) && m.deleted_for_user_ids.includes(profile.id));
+          const partnerId = m.sender_id === profile.id ? m.receiver_id : m.sender_id;
+
+          if (partnerId && partnerId !== profile.id) {
+            if (!isDeletedForMe) {
+              partnerIdsWithHistory.add(partnerId);
+              if (!lastMessageByPartner[partnerId]) {
+                lastMessageByPartner[partnerId] = m as Message;
+              }
+            }
+          }
+        });
+
+        // 2. Fetch all users whom current logged-in user follows from public.follows
+        const { data: followData, error: followErr } = await supabase
+          .from('follows')
+          .select('following_id')
+          .eq('follower_id', profile.id);
+
+        if (followErr) {
+          console.warn('Error fetching follows for conversations:', followErr);
+        }
+
+        const followedIdSet = new Set<string>(
+          (followData || []).map((f: { following_id: string }) => f.following_id)
+        );
+
+        // Merge with optimistic followedUserIds / followingMap from FollowContext
+        Object.keys(followingMap).forEach((id) => {
+          if (followingMap[id] && id !== profile.id) {
+            followedIdSet.add(id);
+          } else if (followingMap[id] === false) {
+            followedIdSet.delete(id);
+          }
+        });
+        followedUserIds.forEach((id) => {
+          if (id && id !== profile.id) followedIdSet.add(id);
+        });
+
+        // 3. UNION of:
+        //    a) Users with direct message conversation history
+        //    b) Users followed by currently authenticated user
+        //    c) initialPartner if provided
+        const allContactIds = new Set<string>([
+          ...Array.from(partnerIdsWithHistory),
+          ...Array.from(followedIdSet),
+        ]);
+
+        if (initialPartner?.id && initialPartner.id !== profile.id) {
+          allContactIds.add(initialPartner.id);
+        }
+
+        if (allContactIds.size === 0) {
+          setConversations([]);
+          return;
+        }
+
+        // 4. Fetch profiles for all distinct contact IDs
+        const { data: profilesData, error: profErr } = await supabase
+          .from('profiles')
+          .select('*')
+          .in('id', Array.from(allContactIds));
+
+        if (profErr) {
+          console.warn('Error fetching contact profiles:', profErr);
+        }
+
+        const profileMap = new Map<string, Profile>();
+        (profilesData || []).forEach((p: Profile) => {
+          profileMap.set(p.id, p);
+        });
+
+        if (initialPartner && !profileMap.has(initialPartner.id)) {
+          profileMap.set(initialPartner.id, initialPartner);
+        }
+
+        // 5. Build ConversationItem list
+        const items: ConversationItem[] = [];
+
+        allContactIds.forEach((id) => {
+          const partnerProfile = profileMap.get(id);
+          if (partnerProfile) {
+            const lastMsg = lastMessageByPartner[id] || null;
+            const isUserFollowed = followedIdSet.has(id);
+            items.push({
+              partner: partnerProfile,
+              lastMessage: lastMsg,
+              isFollowed: isUserFollowed,
+            });
+          }
+        });
+
+        // 6. Sort items:
+        //    - Recent active conversations first (DESC by last message timestamp)
+        //    - Followed contacts with no messages sorted alphabetically by name
+        items.sort((a, b) => {
+          if (a.lastMessage && b.lastMessage) {
+            return (
+              new Date(b.lastMessage.created_at).getTime() -
+              new Date(a.lastMessage.created_at).getTime()
+            );
+          }
+          if (a.lastMessage && !b.lastMessage) return -1;
+          if (!a.lastMessage && b.lastMessage) return 1;
+          const nameA = (a.partner.display_name || a.partner.username || '').toLowerCase();
+          const nameB = (b.partner.display_name || b.partner.username || '').toLowerCase();
+          return nameA.localeCompare(nameB);
+        });
+
+        setConversations(items);
+
+        // Keep activePartner updated if already chosen
+        setActivePartner((currentActive) => {
+          if (currentActive) {
+            const updated = profileMap.get(currentActive.id);
+            return updated || currentActive;
+          }
+          return initialPartner || null;
+        });
+      } catch (err) {
+        console.warn('Error fetching conversations and followed contacts:', err);
+      }
+    } else {
+      // Fallback for offline/demo environment
+      setConversations((prev) => {
+        if (initialPartner && !prev.some((c) => c.partner.id === initialPartner.id)) {
+          return [{ partner: initialPartner, lastMessage: null, isFollowed: true }, ...prev];
+        }
+        return prev;
+      });
+    }
+  }, [profile?.id, followingMap, followedUserIds, initialPartner]);
+
+  // Load conversations on mount & when follow state changes
+  useEffect(() => {
+    fetchUsersAndConversations();
+  }, [fetchUsersAndConversations]);
+
+  // Global Realtime Listener for new messages & follows
+  useEffect(() => {
+    if (!profile || !isSupabaseConfigured) return;
+
+    const globalInboxChannel = supabase
+      .channel(`global_inbox_${profile.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages',
+        },
+        async (payload) => {
+          const newMsg = payload.new as Message;
+          if (!newMsg || newMsg.is_unsent) return;
+          if (
+            Array.isArray(newMsg.deleted_for_user_ids) &&
+            newMsg.deleted_for_user_ids.includes(profile.id)
+          ) {
+            return;
+          }
+
+          const isRecipient = newMsg.receiver_id === profile.id;
+          const isSender = newMsg.sender_id === profile.id;
+          if (!isRecipient && !isSender) return;
+
+          const partnerId = isSender ? newMsg.receiver_id : newMsg.sender_id;
+
+          // Update conversation list last message and move partner to top
+          setConversations((prev) => {
+            const existing = prev.find((c) => c.partner.id === partnerId);
+            if (existing) {
+              const updated: ConversationItem = {
+                ...existing,
+                lastMessage: newMsg,
+              };
+              return [updated, ...prev.filter((c) => c.partner.id !== partnerId)];
+            } else {
+              // Partner not in current list -> refresh
+              fetchUsersAndConversations();
+              return prev;
+            }
+          });
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'follows',
+        },
+        () => {
+          fetchUsersAndConversations();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(globalInboxChannel);
+    };
+  }, [profile?.id, fetchUsersAndConversations]);
 
   // Fetch ONLY followed users when opening the "New Message" modal
   useEffect(() => {
@@ -128,7 +376,6 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
       setIsLoadingFollowedUsers(true);
       if (isSupabaseConfigured) {
         try {
-          // 1. Query follows table for all following_id where follower_id === currentUserId
           const { data: followData, error: followErr } = await supabase
             .from('follows')
             .select('following_id')
@@ -140,6 +387,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
             new Set([
               ...(followData || []).map((f: { following_id: string }) => f.following_id),
               ...Object.keys(followingMap).filter((id) => followingMap[id] && id !== profile.id),
+              ...followedUserIds.filter((id) => id !== profile.id),
             ])
           );
 
@@ -149,7 +397,6 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
             return;
           }
 
-          // 2. Fetch only profiles whose id is in followingIds
           const { data: followedProfiles, error: profErr } = await supabase
             .from('profiles')
             .select('*')
@@ -161,113 +408,25 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
           setFollowedUsers((followedProfiles || []) as Profile[]);
         } catch (err) {
           console.warn('Error fetching followed users for chat picker:', err);
-          // Fallback to followingMap
           const fallback = Object.keys(followingMap)
             .filter((id) => followingMap[id] && id !== profile.id)
-            .map((id) => conversations.find((c) => c.id === id))
+            .map((id) => conversations.find((c) => c.partner.id === id)?.partner)
             .filter(Boolean) as Profile[];
           setFollowedUsers(fallback);
         } finally {
           setIsLoadingFollowedUsers(false);
         }
       } else {
-        // Fallback in demo mode
-        const localFollowed = conversations.filter(
-          (u) => (isFollowing(u.id) || followingMap[u.id]) && u.id !== profile.id
-        );
+        const localFollowed = conversations
+          .filter((c) => c.isFollowed && c.partner.id !== profile.id)
+          .map((c) => c.partner);
         setFollowedUsers(localFollowed);
         setIsLoadingFollowedUsers(false);
       }
     };
 
     fetchFollowedUsersForPicker();
-  }, [isSearchingUser, profile?.id, followingMap]);
-
-  // Load existing profiles / conversations
-  useEffect(() => {
-    if (!profile) return;
-
-    const fetchUsersAndConversations = async () => {
-      if (isSupabaseConfigured) {
-        try {
-          // 1. Fetch profiles
-          const { data: profilesData } = await supabase
-            .from('profiles')
-            .select('*')
-            .neq('id', profile.id)
-            .limit(100);
-
-          // 2. Fetch users whom the current logged-in user follows
-          const { data: followData } = await supabase
-            .from('follows')
-            .select('following_id')
-            .eq('follower_id', profile.id);
-
-          const followedIds = new Set<string>(
-            (followData || []).map((f: { following_id: string }) => f.following_id)
-          );
-
-          // 3. Fetch users with active chat history (messages sent or received)
-          const { data: messagesData } = await supabase
-            .from('messages')
-            .select('sender_id, receiver_id')
-            .or(`sender_id.eq.${profile.id},receiver_id.eq.${profile.id}`);
-
-          const activeChatIds = new Set<string>();
-          (messagesData || []).forEach((m: { sender_id: string; receiver_id: string }) => {
-            if (m.sender_id && m.sender_id !== profile.id) activeChatIds.add(m.sender_id);
-            if (m.receiver_id && m.receiver_id !== profile.id) activeChatIds.add(m.receiver_id);
-          });
-
-          // 4. Combine IDs: Followed users + active chat partners + initial partner + followingMap
-          const allowedUserIds = new Set<string>([
-            ...Array.from(followedIds),
-            ...Array.from(activeChatIds),
-            ...Object.keys(followingMap).filter((id) => followingMap[id]),
-          ]);
-          if (initialPartner?.id) {
-            allowedUserIds.add(initialPartner.id);
-          }
-
-          // 5. Filter conversation list strictly to allowed users
-          const candidateUsers = (profilesData || []) as Profile[];
-          const filteredConversations = candidateUsers.filter((p) => allowedUserIds.has(p.id));
-
-          // Ensure initialPartner is included in list if passed via prop
-          if (initialPartner && !filteredConversations.some((c) => c.id === initialPartner.id)) {
-            filteredConversations.unshift(initialPartner);
-          }
-
-          setConversations(filteredConversations);
-
-          // Set default active partner if not already selected
-          if (!activePartner) {
-            if (initialPartner) {
-              setActivePartner(initialPartner);
-            } else if (filteredConversations.length > 0) {
-              setActivePartner(filteredConversations[0]);
-            }
-          }
-        } catch (err) {
-          console.warn('Error fetching profiles for chat:', err);
-        }
-      } else {
-        // Fallback for mock/demo environment without configured Supabase
-        const mockAllowed = conversations.filter(
-          (u) => isFollowing(u.id) || followingMap[u.id] || u.id === initialPartner?.id
-        );
-        if (initialPartner && !mockAllowed.some((c) => c.id === initialPartner.id)) {
-          mockAllowed.unshift(initialPartner);
-        }
-        setConversations(mockAllowed);
-        if (!activePartner && mockAllowed.length > 0) {
-          setActivePartner(mockAllowed[0]);
-        }
-      }
-    };
-
-    fetchUsersAndConversations();
-  }, [profile?.id, followingMap]);
+  }, [isSearchingUser, profile?.id, followingMap, followedUserIds, conversations]);
 
   // Load message history & setup real-time broadcast and message listeners
   useEffect(() => {
@@ -817,6 +976,24 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
 
     setMessages((prev) => [...prev, optimisticMsg]);
 
+    // Update conversation list locally & move active conversation to top
+    setConversations((prev) => {
+      const existingIdx = prev.findIndex((c) => c.partner.id === activePartner.id);
+      const isUserFollowed = Boolean(
+        isFollowing(activePartner.id) ||
+        followingMap[activePartner.id] ||
+        followedUserIds.includes(activePartner.id) ||
+        (existingIdx >= 0 ? prev[existingIdx].isFollowed : false)
+      );
+      const updatedItem: ConversationItem = {
+        partner: activePartner,
+        lastMessage: optimisticMsg,
+        isFollowed: isUserFollowed,
+      };
+      const rest = prev.filter((c) => c.partner.id !== activePartner.id);
+      return [updatedItem, ...rest];
+    });
+
     if (isSupabaseConfigured) {
       try {
         const payloadToInsert: any = {
@@ -885,11 +1062,16 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
     }
   };
 
-  const filteredConversations = conversations.filter(
-    (c) =>
-      c.display_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      c.username.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredConversations = conversations.filter((item) => {
+    const user = item.partner;
+    const q = searchQuery.toLowerCase().trim();
+    if (!q) return true;
+    return (
+      user.display_name?.toLowerCase().includes(q) ||
+      user.username.toLowerCase().includes(q) ||
+      (item.lastMessage?.content && item.lastMessage.content.toLowerCase().includes(q))
+    );
+  });
 
   return (
     <main className="w-full max-w-[990px] h-[100dvh] border-r border-neutral-800 flex overflow-hidden select-none">
@@ -932,44 +1114,111 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
         <div className="flex-1 overflow-y-auto divide-y divide-[#18181b]">
           {filteredConversations.length === 0 ? (
             <div className="p-8 text-center text-[#89919d]">
-              <p className="text-sm font-semibold text-[#e5e2e1] mb-1">No conversations</p>
-              <p className="text-xs mb-4">Users you follow or have active chats with will appear here.</p>
-              <button
-                onClick={() => setIsSearchingUser(true)}
-                className="px-4 py-1.5 bg-[#1d9bf0] text-white text-xs font-bold rounded-full hover:bg-[#1a8cd8] cursor-pointer"
-              >
-                New Message
-              </button>
+              <p className="text-sm font-semibold text-[#e5e2e1] mb-1">
+                {searchQuery.trim() ? 'No matches found' : 'No conversations'}
+              </p>
+              <p className="text-xs mb-4 text-[#89919d]">
+                {searchQuery.trim()
+                  ? `No direct messages or contacts matching "${searchQuery}"`
+                  : 'Users you follow will automatically appear here so you can chat directly.'}
+              </p>
+              {!searchQuery.trim() && (
+                <button
+                  onClick={() => setIsSearchingUser(true)}
+                  className="px-4 py-1.5 bg-[#1d9bf0] text-white text-xs font-bold rounded-full hover:bg-[#1a8cd8] cursor-pointer"
+                >
+                  New Message
+                </button>
+              )}
             </div>
           ) : (
-            filteredConversations.map((user) => {
+            filteredConversations.map((item) => {
+              const user = item.partner;
               const isSelected = activePartner?.id === user.id;
+              const lastMsg = item.lastMessage;
+              const isMe = lastMsg?.sender_id === profile?.id;
+
+              // Format last message preview
+              let previewText = 'Start a conversation';
+              if (lastMsg) {
+                if (lastMsg.message_type === 'call') {
+                  const isMissed =
+                    lastMsg.call_status === 'missed' ||
+                    lastMsg.call_status === 'rejected' ||
+                    lastMsg.call_status === 'declined' ||
+                    lastMsg.call_status === 'failed';
+                  const isVideo = lastMsg.call_type === 'video';
+                  previewText = isMissed
+                    ? isMe
+                      ? 'Outgoing Missed Call'
+                      : 'Missed Call'
+                    : isVideo
+                    ? 'Video Call'
+                    : 'Voice Call';
+                } else {
+                  previewText = isMe ? `You: ${lastMsg.content}` : lastMsg.content;
+                }
+              }
+
               return (
                 <div
                   key={user.id}
+                  id={`conversation-item-${user.id}`}
                   onClick={() => {
                     setActivePartner(user);
                     setShowMobileChat(true);
                   }}
-                  className={`p-4 flex items-center gap-3 cursor-pointer transition-colors ${
+                  className={`p-3.5 sm:p-4 flex items-center gap-3 cursor-pointer transition-colors ${
                     isSelected ? 'bg-[#18181b]' : 'hover:bg-[#121212]'
                   }`}
                 >
-                  <img
-                    src={user.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80'}
-                    alt={user.username}
-                    className="w-11 h-11 rounded-full object-cover border border-[#27272a] shrink-0"
-                  />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1">
-                      <span className="font-bold text-sm text-[#e5e2e1] truncate">
-                        {user.display_name || user.username}
+                  <div className="relative shrink-0">
+                    <img
+                      src={
+                        user.avatar_url ||
+                        'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80'
+                      }
+                      alt={user.username}
+                      className="w-11 h-11 rounded-full object-cover border border-[#27272a]"
+                    />
+                    {item.isFollowed && !lastMsg && (
+                      <span
+                        className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 bg-[#1d9bf0] rounded-full border-2 border-black flex items-center justify-center text-[8px] text-white font-bold"
+                        title="Followed contact"
+                      >
+                        ✓
                       </span>
-                      {user.verified && (
-                        <CheckCircle2 className="w-3.5 h-3.5 text-[#1d9bf0] fill-[#1d9bf0] shrink-0" />
+                    )}
+                  </div>
+
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-1 mb-0.5">
+                      <div className="flex items-center gap-1 min-w-0">
+                        <span className="font-bold text-sm text-[#e5e2e1] truncate">
+                          {user.display_name || user.username}
+                        </span>
+                        {user.verified && (
+                          <CheckCircle2 className="w-3.5 h-3.5 text-[#1d9bf0] fill-[#1d9bf0] shrink-0" />
+                        )}
+                        <span className="text-xs text-[#89919d] truncate">@{user.username}</span>
+                      </div>
+
+                      {lastMsg && (
+                        <span className="text-[11px] text-[#89919d] shrink-0 font-normal">
+                          {formatRelativeTime(lastMsg.created_at)}
+                        </span>
                       )}
                     </div>
-                    <span className="text-xs text-[#89919d] truncate">@{user.username}</span>
+
+                    <div className="flex items-center justify-between gap-2">
+                      <p
+                        className={`text-xs truncate ${
+                          lastMsg ? 'text-[#89919d]' : 'text-[#1d9bf0] font-medium'
+                        }`}
+                      >
+                        {lastMsg ? previewText : 'Start a conversation'}
+                      </p>
+                    </div>
                   </div>
                 </div>
               );
@@ -1674,9 +1923,12 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                       key={u.id}
                       onClick={() => {
                         setActivePartner(u);
-                        if (!conversations.some((c) => c.id === u.id)) {
-                          setConversations((prev) => [u, ...prev]);
-                        }
+                        setConversations((prev) => {
+                          if (!prev.some((c) => c.partner.id === u.id)) {
+                            return [{ partner: u, lastMessage: null, isFollowed: true }, ...prev];
+                          }
+                          return prev;
+                        });
                         setIsSearchingUser(false);
                         setPickerSearchQuery('');
                         setShowMobileChat(true);
