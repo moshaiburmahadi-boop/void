@@ -3,7 +3,20 @@ import { useAuth } from '../../context/AuthContext';
 import { useFollow } from '../../context/FollowContext';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { Notification, Profile } from '../../types';
-import { Heart, Repeat2, User, Settings, Bell, CheckCircle2, UserCheck, UserPlus } from 'lucide-react';
+import {
+  Heart,
+  Repeat2,
+  User,
+  Settings,
+  Bell,
+  CheckCircle2,
+  UserCheck,
+  UserPlus,
+  Camera,
+  Image as ImageIcon,
+  ArrowUpRight,
+  Sparkles,
+} from 'lucide-react';
 
 interface NotificationsViewProps {
   onViewProfile?: (user: Profile) => void;
@@ -19,7 +32,20 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({ onViewProf
     if (!profile?.id) return;
 
     const fetchNotifications = async () => {
-      if (!isSupabaseConfigured) return;
+      if (!isSupabaseConfigured) {
+        // Load local notifications broadcast
+        try {
+          const localKey = 'void_local_notifications_broadcast';
+          const stored = localStorage.getItem(localKey);
+          if (stored) {
+            const parsed = JSON.parse(stored);
+            setNotifications(parsed);
+          }
+        } catch (e) {
+          console.warn('Local notifs read err:', e);
+        }
+        return;
+      }
 
       try {
         const { data, error } = await supabase
@@ -100,6 +126,12 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({ onViewProf
     ? notifications.filter((n) => n.type === 'mention')
     : notifications;
 
+  const handleNotificationClick = (notif: Notification, actor: Profile) => {
+    if (onViewProfile && actor) {
+      onViewProfile(actor);
+    }
+  };
+
   return (
     <main className="w-full max-w-[600px] shrink-0 min-h-screen border-r border-[#201f1f] relative pb-20 lg:pb-8 select-none">
       {/* Page Header */}
@@ -145,7 +177,7 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({ onViewProf
             </div>
             <h3 className="text-lg font-bold text-[#e5e2e1] mb-1">Nothing to see here — yet</h3>
             <p className="text-xs max-w-sm text-[#89919d]">
-              From likes to reposts and a whole lot more, this is where all the action about your posts and account will happen.
+              From likes, follows, and profile updates from people you follow, this is where all the updates will appear.
             </p>
           </div>
         ) : (
@@ -155,6 +187,7 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({ onViewProf
               username: 'member',
               display_name: 'Member',
               avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80',
+              cover_url: null,
               created_at: new Date().toISOString(),
             };
             const followed = isFollowing(notif.actor_id);
@@ -162,7 +195,8 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({ onViewProf
             return (
               <article
                 key={notif.id}
-                className="p-4 hover:bg-[#080808] transition-colors cursor-pointer flex gap-4"
+                onClick={() => handleNotificationClick(notif, actor)}
+                className="p-4 hover:bg-[#0c0c0e] transition-colors cursor-pointer flex gap-4 group"
               >
                 {/* Notification Icon */}
                 <div className="w-10 flex justify-end shrink-0 pt-0.5">
@@ -174,6 +208,16 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({ onViewProf
                   )}
                   {notif.type === 'follow' && (
                     <User className="w-6 h-6 text-emerald-400 fill-emerald-400" />
+                  )}
+                  {notif.type === 'avatar_update' && (
+                    <div className="w-7 h-7 rounded-full bg-[#1d9bf0]/15 border border-[#1d9bf0]/30 flex items-center justify-center">
+                      <Camera className="w-4 h-4 text-[#1d9bf0]" />
+                    </div>
+                  )}
+                  {notif.type === 'cover_update' && (
+                    <div className="w-7 h-7 rounded-full bg-purple-500/15 border border-purple-500/30 flex items-center justify-center">
+                      <ImageIcon className="w-4 h-4 text-purple-400" />
+                    </div>
                   )}
                   {notif.type === 'mention' && (
                     <img
@@ -208,7 +252,10 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({ onViewProf
 
                       {notif.type === 'follow' && (
                         <button
-                          onClick={() => toggleFollow(actor)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleFollow(actor);
+                          }}
                           className={`px-3.5 py-1 rounded-full text-xs font-bold transition-all active:scale-95 cursor-pointer flex items-center gap-1 group ${
                             followed
                               ? 'bg-transparent border border-[#3f3f46] text-[#e5e2e1] hover:border-red-500 hover:text-red-500 hover:bg-red-950/20'
@@ -229,9 +276,16 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({ onViewProf
                           )}
                         </button>
                       )}
+
+                      {(notif.type === 'avatar_update' || notif.type === 'cover_update') && (
+                        <span className="inline-flex items-center gap-1 text-[11px] text-[#1d9bf0] font-medium opacity-0 group-hover:opacity-100 transition-opacity">
+                          View profile <ArrowUpRight className="w-3 h-3" />
+                        </span>
+                      )}
                     </div>
                   )}
 
+                  {/* Like Notification */}
                   {notif.type === 'like' && (
                     <>
                       <div className="text-sm text-[#e5e2e1]">
@@ -245,6 +299,7 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({ onViewProf
                     </>
                   )}
 
+                  {/* Repost Notification */}
                   {notif.type === 'repost' && (
                     <>
                       <div className="text-sm text-[#e5e2e1]">
@@ -258,12 +313,75 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({ onViewProf
                     </>
                   )}
 
+                  {/* Follow Notification */}
                   {notif.type === 'follow' && (
                     <div className="text-sm text-[#e5e2e1]">
                       <span className="font-bold">@{actor.username}</span> started following you
                     </div>
                   )}
 
+                  {/* Profile Picture Update Notification */}
+                  {notif.type === 'avatar_update' && (
+                    <div className="space-y-2">
+                      <div className="text-sm text-[#e5e2e1] leading-snug">
+                        <span className="font-bold">{actor.display_name || `@${actor.username}`}</span>{' '}
+                        updated their profile picture.
+                      </div>
+                      <div className="flex items-center gap-3 p-2.5 rounded-xl bg-[#141417] border border-[#27272a] group-hover:border-[#1d9bf0]/40 transition-colors w-fit max-w-full">
+                        <img
+                          src={actor.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80'}
+                          alt={actor.username}
+                          className="w-11 h-11 rounded-full object-cover border border-[#3f3f46]"
+                        />
+                        <div className="flex flex-col pr-2">
+                          <span className="text-xs font-semibold text-[#e5e2e1]">New Profile Photo</span>
+                          <span className="text-[11px] text-[#1d9bf0] font-medium flex items-center gap-0.5 mt-0.5">
+                            Click to open profile <ArrowUpRight className="w-3 h-3" />
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Cover Photo Update Notification */}
+                  {notif.type === 'cover_update' && (
+                    <div className="space-y-2">
+                      <div className="text-sm text-[#e5e2e1] leading-snug">
+                        <span className="font-bold">{actor.display_name || `@${actor.username}`}</span>{' '}
+                        updated their cover photo.
+                      </div>
+                      {actor.cover_url ? (
+                        <div className="rounded-xl overflow-hidden bg-[#141417] border border-[#27272a] group-hover:border-purple-500/40 transition-colors max-w-sm">
+                          <div className="h-20 w-full overflow-hidden relative">
+                            <img
+                              src={actor.cover_url}
+                              alt="Cover Preview"
+                              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                            />
+                            <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
+                            <span className="absolute bottom-1.5 left-2.5 text-[11px] font-semibold text-white/95 flex items-center gap-1">
+                              <Sparkles className="w-3 h-3 text-purple-400" /> New Cover Photo
+                            </span>
+                          </div>
+                          <div className="px-3 py-1.5 bg-[#18181c] flex items-center justify-between text-[11px] text-[#89919d]">
+                            <span>Click to view profile</span>
+                            <span className="text-[#1d9bf0] font-medium flex items-center gap-0.5">
+                              View <ArrowUpRight className="w-3 h-3" />
+                            </span>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="p-2.5 rounded-xl bg-[#141417] border border-[#27272a] group-hover:border-purple-500/40 transition-colors w-fit">
+                          <span className="text-xs text-[#89919d] flex items-center gap-1.5">
+                            <ImageIcon className="w-3.5 h-3.5 text-purple-400" />
+                            <span>Cover photo changed • Click to view profile</span>
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Mention Notification */}
                   {notif.type === 'mention' && (
                     <>
                       <div className="flex items-center gap-1.5 text-xs text-[#89919d]">
@@ -293,3 +411,4 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({ onViewProf
     </main>
   );
 };
+

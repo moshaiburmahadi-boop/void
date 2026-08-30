@@ -238,15 +238,28 @@ CREATE TABLE IF NOT EXISTS public.message_reactions (
 CREATE INDEX IF NOT EXISTS idx_reactions_message ON public.message_reactions(message_id);
 CREATE INDEX IF NOT EXISTS idx_reactions_user ON public.message_reactions(user_id);
 
--- 8. Notifications Table
+-- 8. Notifications Table (Likes, Reposts, Follows, Mentions, Avatar & Cover Photo Updates)
 CREATE TABLE IF NOT EXISTS public.notifications (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE NOT NULL,
   actor_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE NOT NULL,
-  type TEXT NOT NULL CHECK (type IN ('like', 'repost', 'follow', 'mention')),
+  type TEXT NOT NULL,
   post_id UUID REFERENCES public.posts(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
 );
+
+-- Safely remove old check constraint if present and add flexible/updated check
+DO $$
+BEGIN
+  ALTER TABLE public.notifications DROP CONSTRAINT IF EXISTS notifications_type_check;
+  ALTER TABLE public.notifications ADD CONSTRAINT notifications_type_check 
+    CHECK (type IN ('like', 'repost', 'follow', 'mention', 'avatar_update', 'cover_update'));
+EXCEPTION
+  WHEN OTHERS THEN NULL;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_notifications_user ON public.notifications(user_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_actor ON public.notifications(actor_id);
 
 -- 9. Push Subscriptions Table (Web Push / Background Notifications)
 CREATE TABLE IF NOT EXISTS public.push_subscriptions (

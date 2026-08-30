@@ -8,7 +8,7 @@ import {
   GenderVisibility,
 } from '../types';
 import { supabase, isSupabaseConfigured, uploadProfileAsset } from '../lib/supabase';
-import { PRESET_INTERESTS, sanitizeWebsiteUrl } from '../utils/profile';
+import { PRESET_INTERESTS, sanitizeWebsiteUrl, notifyFollowersOfMediaUpdate } from '../utils/profile';
 import {
   X,
   Camera,
@@ -334,6 +334,31 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
         setErrorMessage(`Failed to update profile: ${result.error.message || 'Unknown error'}`);
         setIsSubmitting(false);
         return;
+      }
+
+      // Check if avatar or cover photo was updated to notify all followers
+      const avatarUpdated = Boolean(
+        finalAvatarUrl &&
+        finalAvatarUrl !== (profile?.avatar_url || null)
+      );
+      const coverUpdated = Boolean(
+        finalCoverUrl &&
+        finalCoverUrl !== (profile?.cover_url || null)
+      );
+
+      const mediaUpdateTypes: ('avatar_update' | 'cover_update')[] = [];
+      if (avatarUpdated) mediaUpdateTypes.push('avatar_update');
+      if (coverUpdated) mediaUpdateTypes.push('cover_update');
+
+      if (mediaUpdateTypes.length > 0 && profile) {
+        const fullUpdatedProfile: Profile = {
+          ...profile,
+          ...updatedData,
+        } as Profile;
+        // Broadcast notification to all followers in background
+        notifyFollowersOfMediaUpdate(fullUpdatedProfile, mediaUpdateTypes).catch((err) => {
+          console.warn('Notification broadcast warning:', err);
+        });
       }
 
       await refreshProfile();

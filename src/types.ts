@@ -100,7 +100,13 @@ export interface Message {
   duration_seconds?: number | null;
 }
 
-export type NotificationType = 'like' | 'repost' | 'follow' | 'mention';
+export type NotificationType =
+  | 'like'
+  | 'repost'
+  | 'follow'
+  | 'mention'
+  | 'avatar_update'
+  | 'cover_update';
 
 export interface Notification {
   id: string;

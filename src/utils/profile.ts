@@ -1,4 +1,5 @@
-import { BirthdayDisplay, BirthdayVisibility, GenderOption, GenderVisibility } from '../types';
+import { BirthdayDisplay, BirthdayVisibility, GenderOption, GenderVisibility, NotificationType, Profile } from '../types';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
 export const PRESET_INTERESTS: string[] = [
   'Technology',
@@ -118,3 +119,86 @@ export function formatWebsiteDisplay(rawUrl?: string | null): string {
   url = url.replace(/\/+$/, '');
   return url;
 }
+
+/**
+ * Sends notifications to all followers when a user updates their profile picture or cover photo.
+ */
+export async function notifyFollowersOfMediaUpdate(
+  actorProfile: Profile,
+  updateTypes: ('avatar_update' | 'cover_update')[]
+): Promise<number> {
+  if (!actorProfile?.id || !updateTypes || updateTypes.length === 0) return 0;
+
+  let notifiedCount = 0;
+
+  if (isSupabaseConfigured) {
+    try {
+      // 1. Fetch all follower IDs of this user
+      const { data: followers, error: followErr } = await supabase
+        .from('follows')
+        .select('follower_id')
+        .eq('following_id', actorProfile.id);
+
+      if (followErr) {
+        console.warn('Error fetching followers for profile update notification:', followErr);
+      } else if (followers && followers.length > 0) {
+        const notificationsPayload: Array<{
+          user_id: string;
+          actor_id: string;
+          type: NotificationType;
+          created_at: string;
+        }> = [];
+
+        for (const f of followers) {
+          // Do not send notification to self
+          if (!f.follower_id || f.follower_id === actorProfile.id) continue;
+
+          for (const uType of updateTypes) {
+            notificationsPayload.push({
+              user_id: f.follower_id,
+              actor_id: actorProfile.id,
+              type: uType,
+              created_at: new Date().toISOString(),
+            });
+          }
+        }
+
+        if (notificationsPayload.length > 0) {
+          const { error: insertErr } = await supabase
+            .from('notifications')
+            .insert(notificationsPayload);
+
+          if (insertErr) {
+            console.warn('Error inserting profile media update notifications:', insertErr);
+          } else {
+            notifiedCount = notificationsPayload.length;
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to notify followers via Supabase:', err);
+    }
+  }
+
+  // Local storage broadcast for offline / demo mode
+  try {
+    const localNotifsKey = `void_local_notifications_broadcast`;
+    const existing = localStorage.getItem(localNotifsKey);
+    const list = existing ? JSON.parse(existing) : [];
+    for (const uType of updateTypes) {
+      list.unshift({
+        id: `local_notif_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        actor_id: actorProfile.id,
+        actor_profile: actorProfile,
+        type: uType,
+        created_at: new Date().toISOString(),
+      });
+    }
+    localStorage.setItem(localNotifsKey, JSON.stringify(list.slice(0, 50)));
+  } catch (e) {
+    console.warn(e);
+  }
+
+  return notifiedCount;
+}
+
