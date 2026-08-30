@@ -106,7 +106,10 @@ export type NotificationType =
   | 'follow'
   | 'mention'
   | 'avatar_update'
-  | 'cover_update';
+  | 'cover_update'
+  | 'missed_audio_call'
+  | 'missed_video_call'
+  | 'missed_call';
 
 export interface Notification {
   id: string;
@@ -125,11 +128,14 @@ export type ActiveTab = 'feed' | 'messages' | 'compose' | 'notifications' | 'pro
 export type CallSessionStatus =
   | 'calling'
   | 'ringing'
+  | 'connecting'
+  | 'active'
   | 'accepted'
   | 'rejected'
   | 'ended'
   | 'missed'
-  | 'cancelled';
+  | 'cancelled'
+  | 'failed';
 
 export interface CallSession {
   id: string;
@@ -141,6 +147,8 @@ export interface CallSession {
   answer?: any;
   duration_seconds?: number | null;
   created_at: string;
+  answered_at?: string | null;
+  ended_at?: string | null;
   updated_at?: string;
   caller_profile?: Profile | null;
   receiver_profile?: Profile | null;

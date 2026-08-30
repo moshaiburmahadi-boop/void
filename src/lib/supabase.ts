@@ -238,7 +238,7 @@ CREATE TABLE IF NOT EXISTS public.message_reactions (
 CREATE INDEX IF NOT EXISTS idx_reactions_message ON public.message_reactions(message_id);
 CREATE INDEX IF NOT EXISTS idx_reactions_user ON public.message_reactions(user_id);
 
--- 8. Notifications Table (Likes, Reposts, Follows, Mentions, Avatar & Cover Photo Updates)
+-- 8. Notifications Table (Likes, Reposts, Follows, Mentions, Avatar & Cover Photo Updates, Missed Calls)
 CREATE TABLE IF NOT EXISTS public.notifications (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE NOT NULL,
@@ -248,12 +248,12 @@ CREATE TABLE IF NOT EXISTS public.notifications (
   created_at TIMESTAMPTZ DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
 );
 
--- Safely remove old check constraint if present and add flexible/updated check
+-- Safely update check constraint for all notification types including missed calls
 DO $$
 BEGIN
   ALTER TABLE public.notifications DROP CONSTRAINT IF EXISTS notifications_type_check;
   ALTER TABLE public.notifications ADD CONSTRAINT notifications_type_check 
-    CHECK (type IN ('like', 'repost', 'follow', 'mention', 'avatar_update', 'cover_update'));
+    CHECK (type IN ('like', 'repost', 'follow', 'mention', 'avatar_update', 'cover_update', 'missed_audio_call', 'missed_video_call', 'missed_call'));
 EXCEPTION
   WHEN OTHERS THEN NULL;
 END $$;
@@ -282,13 +282,20 @@ CREATE TABLE IF NOT EXISTS public.call_sessions (
   caller_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE NOT NULL,
   receiver_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE NOT NULL,
   call_type TEXT NOT NULL DEFAULT 'audio' CHECK (call_type IN ('audio', 'video')),
-  status TEXT NOT NULL DEFAULT 'calling' CHECK (status IN ('calling', 'ringing', 'accepted', 'rejected', 'ended', 'missed', 'cancelled')),
+  status TEXT NOT NULL DEFAULT 'calling' CHECK (status IN ('calling', 'ringing', 'connecting', 'active', 'accepted', 'rejected', 'ended', 'missed', 'cancelled', 'failed')),
   offer JSONB,
   answer JSONB,
   duration_seconds INTEGER DEFAULT 0,
   created_at TIMESTAMPTZ DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
+  answered_at TIMESTAMPTZ,
+  ended_at TIMESTAMPTZ,
   updated_at TIMESTAMPTZ DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
 );
+
+-- Upgrade existing call_sessions table if needed:
+ALTER TABLE public.call_sessions ADD COLUMN IF NOT EXISTS answered_at TIMESTAMPTZ;
+ALTER TABLE public.call_sessions ADD COLUMN IF NOT EXISTS ended_at TIMESTAMPTZ;
+ALTER TABLE public.call_sessions ADD COLUMN IF NOT EXISTS duration_seconds INTEGER DEFAULT 0;
 
 CREATE INDEX IF NOT EXISTS idx_call_sessions_caller ON public.call_sessions(caller_id);
 CREATE INDEX IF NOT EXISTS idx_call_sessions_receiver ON public.call_sessions(receiver_id);

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useFollow } from '../../context/FollowContext';
+import { useCall } from '../../context/CallContext';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { Notification, Profile } from '../../types';
 import {
@@ -16,6 +17,10 @@ import {
   Image as ImageIcon,
   ArrowUpRight,
   Sparkles,
+  PhoneMissed,
+  VideoOff,
+  Phone,
+  Video,
 } from 'lucide-react';
 
 interface NotificationsViewProps {
@@ -25,6 +30,7 @@ interface NotificationsViewProps {
 export const NotificationsView: React.FC<NotificationsViewProps> = ({ onViewProfile }) => {
   const { profile } = useAuth();
   const { isFollowing, toggleFollow } = useFollow();
+  const { startCall } = useCall();
   const [tab, setTab] = useState<'all' | 'mentions'>('all');
   const [notifications, setNotifications] = useState<Notification[]>([]);
 
@@ -219,6 +225,16 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({ onViewProf
                       <ImageIcon className="w-4 h-4 text-purple-400" />
                     </div>
                   )}
+                  {(notif.type === 'missed_audio_call' || notif.type === 'missed_call') && (
+                    <div className="w-7 h-7 rounded-full bg-red-500/15 border border-red-500/30 flex items-center justify-center">
+                      <PhoneMissed className="w-4 h-4 text-red-400" />
+                    </div>
+                  )}
+                  {notif.type === 'missed_video_call' && (
+                    <div className="w-7 h-7 rounded-full bg-red-500/15 border border-red-500/30 flex items-center justify-center">
+                      <VideoOff className="w-4 h-4 text-red-400" />
+                    </div>
+                  )}
                   {notif.type === 'mention' && (
                     <img
                       src={actor.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80'}
@@ -250,6 +266,7 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({ onViewProf
                         className="w-8 h-8 rounded-full object-cover border border-[#27272a] hover:opacity-80 transition-opacity cursor-pointer"
                       />
 
+                      {/* Follow / Call Back Action Button */}
                       {notif.type === 'follow' && (
                         <button
                           onClick={(e) => {
@@ -277,6 +294,26 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({ onViewProf
                         </button>
                       )}
 
+                      {(notif.type === 'missed_audio_call' || notif.type === 'missed_video_call' || notif.type === 'missed_call') && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const isVideo = notif.type === 'missed_video_call';
+                            startCall(actor, isVideo ? 'video' : 'audio');
+                          }}
+                          className="px-3.5 py-1.5 rounded-full text-xs font-bold transition-all active:scale-95 cursor-pointer flex items-center gap-1.5 bg-red-500/15 hover:bg-red-500/25 border border-red-500/30 text-red-300 hover:text-white"
+                          title="Call back"
+                        >
+                          {notif.type === 'missed_video_call' ? (
+                            <Video className="w-3.5 h-3.5 text-red-400" />
+                          ) : (
+                            <Phone className="w-3.5 h-3.5 text-red-400" />
+                          )}
+                          <span>Call Back</span>
+                        </button>
+                      )}
+
                       {(notif.type === 'avatar_update' || notif.type === 'cover_update') && (
                         <span className="inline-flex items-center gap-1 text-[11px] text-[#1d9bf0] font-medium opacity-0 group-hover:opacity-100 transition-opacity">
                           View profile <ArrowUpRight className="w-3 h-3" />
@@ -297,6 +334,29 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({ onViewProf
                         </p>
                       )}
                     </>
+                  )}
+
+                  {/* Missed Call Notification Card */}
+                  {(notif.type === 'missed_audio_call' || notif.type === 'missed_video_call' || notif.type === 'missed_call') && (
+                    <div className="space-y-1">
+                      <div className="text-sm text-[#e5e2e1] leading-snug">
+                        <span className="font-bold">{actor.display_name || `@${actor.username}`}</span>{' '}
+                        called you
+                      </div>
+                      <div className="flex items-center gap-2 text-xs font-medium text-red-400">
+                        {notif.type === 'missed_video_call' ? (
+                          <>
+                            <VideoOff className="w-3.5 h-3.5" />
+                            <span>Missed Video Call</span>
+                          </>
+                        ) : (
+                          <>
+                            <PhoneMissed className="w-3.5 h-3.5" />
+                            <span>Missed Audio Call</span>
+                          </>
+                        )}
+                      </div>
+                    </div>
                   )}
 
                   {/* Repost Notification */}

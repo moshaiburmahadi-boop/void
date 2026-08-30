@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Profile, Message } from '../../types';
-import { supabase } from '../../lib/supabase';
+import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import {
   Mic,
   MicOff,
@@ -15,6 +15,13 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { callSounds } from '../../utils/callSounds';
+import {
+  RTC_CONFIG,
+  AUDIO_MEDIA_CONSTRAINTS,
+  VIDEO_MEDIA_CONSTRAINTS,
+  getMediaConstraints,
+  setConnectionVideoBitrate,
+} from '../../utils/webrtc';
 
 export type CallStatus =
   | 'initiating'
@@ -23,6 +30,7 @@ export type CallStatus =
   | 'connected'
   | 'ended'
   | 'rejected'
+  | 'missed'
   | 'failed';
 
 interface CallModalProps {
@@ -48,24 +56,6 @@ export const formatCallDurationText = (seconds: number, type: 'audio' | 'video',
     return `${typeLabel} • ${secs}s`;
   }
   return `${typeLabel} • ${mins}m ${secs > 0 ? `${secs}s` : ''}`.trim();
-};
-
-const RTC_CONFIG: RTCConfiguration = {
-  iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-    {
-      urls: 'turn:openrelay.metered.ca:80',
-      username: 'openrelay',
-      credential: 'openrelay',
-    },
-    {
-      urls: 'turn:openrelay.metered.ca:443',
-      username: 'openrelay',
-      credential: 'openrelay',
-    },
-  ],
-  iceCandidatePoolSize: 10,
 };
 
 export const CallModal: React.FC<CallModalProps> = ({
@@ -98,6 +88,7 @@ export const CallModal: React.FC<CallModalProps> = ({
   const queuedCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
   const signalingChannelRef = useRef<any>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const ringTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const callIdRef = useRef<string>(initialCallId || `call_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`);
 
   // Call history logging state refs
@@ -117,7 +108,7 @@ export const CallModal: React.FC<CallModalProps> = ({
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // Record and persist call log
+  // Record and persist call log & notification
   const recordCallLog = async (overrideStatus?: CallStatus) => {
     if (hasLoggedRef.current) return;
     hasLoggedRef.current = true;
@@ -152,10 +143,11 @@ export const CallModal: React.FC<CallModalProps> = ({
       onLogCall(callLog);
     }
 
-    // Only the caller persists the record to avoid duplicate database rows
-    if (isCaller) {
+    // Caller persists the call log in messages & call_sessions & notifications if missed
+    if (isCaller && isSupabaseConfigured) {
       try {
-        const { error } = await supabase.from('messages').insert({
+        // 1. Insert chat call log message
+        await supabase.from('messages').insert({
           sender_id: currentUser.id,
           receiver_id: remoteUser.id,
           content,
@@ -164,11 +156,29 @@ export const CallModal: React.FC<CallModalProps> = ({
           call_type: callType,
           duration_seconds: isConnected ? currentDuration : null,
         });
-        if (error) {
-          console.warn('Could not insert call history record in Supabase:', error);
+
+        // 2. Update call_sessions table
+        await supabase.from('call_sessions').upsert({
+          id: callIdRef.current,
+          caller_id: currentUser.id,
+          receiver_id: remoteUser.id,
+          call_type: callType,
+          status: isConnected ? 'ended' : 'missed',
+          duration_seconds: currentDuration,
+          ended_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
+
+        // 3. If call was missed/unanswered, create a persistent notification in notifications table
+        if (!isConnected) {
+          await supabase.from('notifications').insert({
+            user_id: remoteUser.id,
+            actor_id: currentUser.id,
+            type: callType === 'video' ? 'missed_video_call' : 'missed_audio_call',
+          });
         }
       } catch (err) {
-        console.warn('Call logging error:', err);
+        console.warn('Call logging error in Supabase:', err);
       }
     }
   };
@@ -214,13 +224,47 @@ export const CallModal: React.FC<CallModalProps> = ({
     };
   }, [callStatus]);
 
-  // Outgoing ringing audio effect
+  // Outgoing ringing audio effect & 30-second ring timeout
   useEffect(() => {
-    if (isOpen && isCaller && callStatus === 'calling') {
+    if (isOpen && isCaller && (callStatus === 'calling' || callStatus === 'initiating')) {
       callSounds.playOutgoingRing();
+
+      // 30-second Ringing Timeout
+      ringTimeoutRef.current = setTimeout(() => {
+        if (callStatusRef.current === 'calling' || callStatusRef.current === 'initiating') {
+          console.log('Call timed out with no answer (30s)');
+          setErrorMessage('No answer');
+          setCallStatus('ended');
+          recordCallLog('missed');
+          callSounds.playEndCallTone();
+          if (signalingChannelRef.current) {
+            signalingChannelRef.current.send({
+              type: 'broadcast',
+              event: 'call-ended',
+              payload: {
+                callId: callIdRef.current,
+                senderId: currentUser.id,
+                reason: 'timeout',
+              },
+            });
+          }
+          setTimeout(() => {
+            onEndCall();
+          }, 1500);
+        }
+      }, 30000);
+    } else {
+      if (ringTimeoutRef.current) {
+        clearTimeout(ringTimeoutRef.current);
+        ringTimeoutRef.current = null;
+      }
     }
     return () => {
       callSounds.stop();
+      if (ringTimeoutRef.current) {
+        clearTimeout(ringTimeoutRef.current);
+        ringTimeoutRef.current = null;
+      }
     };
   }, [isOpen, isCaller, callStatus]);
 
@@ -235,22 +279,7 @@ export const CallModal: React.FC<CallModalProps> = ({
         setErrorMessage(null);
 
         // 1. Request Local Media Stream with Low-Latency Mobile-Optimized Constraints
-        const constraints: MediaStreamConstraints = {
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-          },
-          video:
-            callType === 'video'
-              ? {
-                  width: { ideal: 640, max: 854 },
-                  height: { ideal: 360, max: 480 },
-                  frameRate: { ideal: 15, max: 20 },
-                  facingMode: 'user',
-                }
-              : false,
-        };
+        const constraints = getMediaConstraints(callType);
 
         let stream: MediaStream;
         try {
@@ -258,13 +287,7 @@ export const CallModal: React.FC<CallModalProps> = ({
         } catch (mediaErr: any) {
           console.warn('Primary media constraints failed, falling back to basic audio:', mediaErr);
           try {
-            stream = await navigator.mediaDevices.getUserMedia({
-              audio: {
-                echoCancellation: true,
-                noiseSuppression: true,
-                autoGainControl: true,
-              },
-            });
+            stream = await navigator.mediaDevices.getUserMedia({ audio: AUDIO_MEDIA_CONSTRAINTS });
             setIsVideoDisabled(true);
           } catch (audioErr: any) {
             console.error('Microphone/Camera permission denied:', audioErr);
@@ -295,28 +318,8 @@ export const CallModal: React.FC<CallModalProps> = ({
           pc.addTrack(track, stream);
         });
 
-        // Helper to cap video sender bitrate at 350kbps to eliminate jitter & bufferbloat
-        const applyBitrateLimit = () => {
-          try {
-            const senders = pc.getSenders();
-            const videoSender = senders.find((s) => s.track && s.track.kind === 'video');
-            if (videoSender) {
-              const parameters = videoSender.getParameters();
-              if (!parameters.encodings || parameters.encodings.length === 0) {
-                parameters.encodings = [{}];
-              }
-              parameters.encodings[0].maxBitrate = 350000; // 350 kbps cap
-              parameters.encodings[0].maxFramerate = 20;
-              videoSender.setParameters(parameters).catch((err) => {
-                console.warn('Could not set video sender parameters:', err);
-              });
-            }
-          } catch (err) {
-            console.warn('Error applying bitrate limits:', err);
-          }
-        };
-
-        applyBitrateLimit();
+        // Cap video bitrate at 350kbps to eliminate packet jitter & mobile bufferbloat
+        setConnectionVideoBitrate(pc, 350000);
 
         // Remote Stream Setup
         const remoteStream = new MediaStream();
@@ -359,7 +362,7 @@ export const CallModal: React.FC<CallModalProps> = ({
           if (!isMounted) return;
           if (pc.connectionState === 'connected') {
             setCallStatus('connected');
-            applyBitrateLimit();
+            setConnectionVideoBitrate(pc, 350000);
           } else if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
             handleHangUp(false);
           }
