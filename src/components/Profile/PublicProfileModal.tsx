@@ -279,69 +279,76 @@ export const PublicProfileModal: React.FC<PublicProfileModalProps> = ({
                 <p className="text-sm text-[#71767b] italic mb-4">No bio provided yet.</p>
               )}
 
-              {/* Meta details (occupation, education, location, website, birthday, gender, joined) */}
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-[#89919d] mb-3">
+              {/* Meta details (occupation, education, birthday, gender, location, website, joined) */}
+              <div className="flex flex-col gap-2.5 text-xs sm:text-sm text-[#89919d] mb-4">
+                {/* 1. Occupation / Work */}
                 {user.occupation && (
-                  <div className="flex items-center gap-1 text-[#e5e2e1]">
-                    <Briefcase className="w-3.5 h-3.5 text-[#1d9bf0]" />
-                    <span>{user.occupation}</span>
+                  <div className="flex items-start gap-2.5 text-[#e5e2e1]">
+                    <Briefcase className="w-4 h-4 text-[#1d9bf0] shrink-0 mt-0.5" />
+                    <span className="break-words leading-relaxed">{user.occupation}</span>
                   </div>
                 )}
 
+                {/* 2. Education */}
                 {user.education && (
-                  <div className="flex items-center gap-1 text-[#e5e2e1]">
-                    <GraduationCap className="w-3.5 h-3.5 text-[#1d9bf0]" />
-                    <span>{user.education}</span>
+                  <div className="flex items-start gap-2.5 text-[#e5e2e1]">
+                    <GraduationCap className="w-4 h-4 text-[#1d9bf0] shrink-0 mt-0.5" />
+                    <span className="break-words leading-relaxed">{user.education}</span>
                   </div>
                 )}
 
+                {/* 3. Privacy-aware Birthday */}
+                {user.date_of_birth &&
+                  canViewField(user.birthday_visibility, isSelf, isFollowed) &&
+                  user.birthday_display !== 'hidden' && (
+                    <div className="flex items-start gap-2.5">
+                      <Cake className="w-4 h-4 text-[#89919d] shrink-0 mt-0.5" />
+                      <span className="break-words leading-relaxed">
+                        {formatBirthday(user.date_of_birth, user.birthday_display || 'month_day')}
+                      </span>
+                    </div>
+                  )}
+
+                {/* 4. Privacy-aware Gender */}
+                {user.gender &&
+                  user.gender !== 'prefer_not_to_say' &&
+                  canViewField(user.gender_visibility, isSelf, isFollowed) && (
+                    <div className="flex items-start gap-2.5">
+                      <UserIcon className="w-4 h-4 text-[#89919d] shrink-0 mt-0.5" />
+                      <span className="break-words leading-relaxed">
+                        {formatGender(user.gender, user.gender_custom)}
+                      </span>
+                    </div>
+                  )}
+
+                {/* 5. Location */}
                 {user.location && (
-                  <div className="flex items-center gap-1">
-                    <MapPin className="w-3.5 h-3.5 text-[#89919d]" />
-                    <span>{user.location}</span>
+                  <div className="flex items-start gap-2.5">
+                    <MapPin className="w-4 h-4 text-[#89919d] shrink-0 mt-0.5" />
+                    <span className="break-words leading-relaxed">{user.location}</span>
                   </div>
                 )}
 
+                {/* 6. Website */}
                 {user.website && (
-                  <div className="flex items-center gap-1">
-                    <LinkIcon className="w-3.5 h-3.5 text-[#89919d]" />
+                  <div className="flex items-start gap-2.5">
+                    <LinkIcon className="w-4 h-4 text-[#89919d] shrink-0 mt-0.5" />
                     <a
                       href={sanitizeWebsiteUrl(user.website)}
                       target="_blank"
                       rel="noreferrer"
-                      className="text-[#1d9bf0] hover:underline truncate max-w-xs"
+                      className="text-[#1d9bf0] hover:underline break-all leading-relaxed"
                     >
                       {formatWebsiteDisplay(user.website)}
                     </a>
                   </div>
                 )}
 
-                {/* Privacy-aware Birthday */}
-                {user.date_of_birth &&
-                  canViewField(user.birthday_visibility, isSelf, isFollowed) &&
-                  user.birthday_display !== 'hidden' && (
-                    <div className="flex items-center gap-1">
-                      <Cake className="w-3.5 h-3.5 text-[#89919d]" />
-                      <span>
-                        {formatBirthday(user.date_of_birth, user.birthday_display || 'month_day')}
-                      </span>
-                    </div>
-                  )}
-
-                {/* Privacy-aware Gender */}
-                {user.gender &&
-                  user.gender !== 'prefer_not_to_say' &&
-                  canViewField(user.gender_visibility, isSelf, isFollowed) && (
-                    <div className="flex items-center gap-1">
-                      <UserIcon className="w-3.5 h-3.5 text-[#89919d]" />
-                      <span>{formatGender(user.gender, user.gender_custom)}</span>
-                    </div>
-                  )}
-
-                <div className="flex items-center gap-1">
-                  <Calendar className="w-3.5 h-3.5 text-[#89919d]" />
-                  <span>
-                    Joined {user.created_at ? new Date(user.created_at).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }) : 'recently'}
+                {/* 7. Joined Date */}
+                <div className="flex items-start gap-2.5">
+                  <Calendar className="w-4 h-4 text-[#89919d] shrink-0 mt-0.5" />
+                  <span className="break-words leading-relaxed">
+                    Joined {user.created_at ? new Date(user.created_at).toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) : 'recently'}
                   </span>
                 </div>
               </div>

@@ -164,81 +164,92 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           </p>
         )}
 
-        {/* Meta details (location, website, joined, occupation, education, birthday, gender) */}
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-[#89919d] mb-3">
+        {/* Meta details (occupation, education, birthday, gender, location, website, joined) */}
+        <div className="flex flex-col gap-2.5 text-xs sm:text-sm text-[#89919d] mb-4">
+          {/* 1. Occupation / Work */}
           {profile?.occupation && (
-            <div className="flex items-center gap-1 text-[#e5e2e1]">
-              <Briefcase className="w-3.5 h-3.5 text-[#1d9bf0]" />
-              <span>{profile.occupation}</span>
+            <div className="flex items-start gap-2.5 text-[#e5e2e1]">
+              <Briefcase className="w-4 h-4 text-[#1d9bf0] shrink-0 mt-0.5" />
+              <span className="break-words leading-relaxed">{profile.occupation}</span>
             </div>
           )}
 
+          {/* 2. Education */}
           {profile?.education && (
-            <div className="flex items-center gap-1 text-[#e5e2e1]">
-              <GraduationCap className="w-3.5 h-3.5 text-[#1d9bf0]" />
-              <span>{profile.education}</span>
+            <div className="flex items-start gap-2.5 text-[#e5e2e1]">
+              <GraduationCap className="w-4 h-4 text-[#1d9bf0] shrink-0 mt-0.5" />
+              <span className="break-words leading-relaxed">{profile.education}</span>
             </div>
           )}
 
+          {/* 3. Date of Birth */}
+          {profile?.date_of_birth && (
+            <div className="flex items-start gap-2.5">
+              <Cake className="w-4 h-4 text-[#89919d] shrink-0 mt-0.5" />
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="break-words leading-relaxed">
+                  {formatBirthday(profile.date_of_birth, profile.birthday_display || 'month_day') ||
+                    'Birthday set'}
+                </span>
+                {profile.birthday_visibility === 'only_me' && (
+                  <span
+                    title="Only visible to you"
+                    className="inline-flex items-center text-[10px] text-[#71767b] bg-[#1a1a1e] px-1.5 py-0.5 rounded border border-[#27272a]"
+                  >
+                    <Lock className="w-2.5 h-2.5 mr-0.5" /> Only me
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* 4. Gender */}
+          {profile?.gender && profile.gender !== 'prefer_not_to_say' && (
+            <div className="flex items-start gap-2.5">
+              <User className="w-4 h-4 text-[#89919d] shrink-0 mt-0.5" />
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="break-words leading-relaxed">
+                  {formatGender(profile.gender, profile.gender_custom)}
+                </span>
+                {profile.gender_visibility === 'only_me' && (
+                  <span
+                    title="Only visible to you"
+                    className="inline-flex items-center text-[10px] text-[#71767b] bg-[#1a1a1e] px-1.5 py-0.5 rounded border border-[#27272a]"
+                  >
+                    <Lock className="w-2.5 h-2.5 mr-0.5" /> Only me
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* 5. Location */}
           {profile?.location && (
-            <div className="flex items-center gap-1">
-              <MapPin className="w-3.5 h-3.5 text-[#89919d]" />
-              <span>{profile.location}</span>
+            <div className="flex items-start gap-2.5">
+              <MapPin className="w-4 h-4 text-[#89919d] shrink-0 mt-0.5" />
+              <span className="break-words leading-relaxed">{profile.location}</span>
             </div>
           )}
 
+          {/* 6. Website */}
           {profile?.website && (
-            <div className="flex items-center gap-1">
-              <LinkIcon className="w-3.5 h-3.5 text-[#89919d]" />
+            <div className="flex items-start gap-2.5">
+              <LinkIcon className="w-4 h-4 text-[#89919d] shrink-0 mt-0.5" />
               <a
                 href={sanitizeWebsiteUrl(profile.website)}
                 target="_blank"
                 rel="noreferrer"
-                className="text-[#1d9bf0] hover:underline"
+                className="text-[#1d9bf0] hover:underline break-all leading-relaxed"
               >
                 {formatWebsiteDisplay(profile.website)}
               </a>
             </div>
           )}
 
-          {/* Birthday display */}
-          {profile?.date_of_birth && (
-            <div className="flex items-center gap-1">
-              <Cake className="w-3.5 h-3.5 text-[#89919d]" />
-              <span>
-                {formatBirthday(profile.date_of_birth, profile.birthday_display || 'month_day') ||
-                  'Birthday set'}
-              </span>
-              {profile.birthday_visibility === 'only_me' && (
-                <span
-                  title="Only visible to you"
-                  className="inline-flex items-center text-[10px] text-[#71767b] bg-[#1a1a1e] px-1.5 py-0.2 rounded border border-[#27272a] ml-0.5"
-                >
-                  <Lock className="w-2.5 h-2.5 mr-0.5" /> Only me
-                </span>
-              )}
-            </div>
-          )}
-
-          {/* Gender display */}
-          {profile?.gender && profile.gender !== 'prefer_not_to_say' && (
-            <div className="flex items-center gap-1">
-              <User className="w-3.5 h-3.5 text-[#89919d]" />
-              <span>{formatGender(profile.gender, profile.gender_custom)}</span>
-              {profile.gender_visibility === 'only_me' && (
-                <span
-                  title="Only visible to you"
-                  className="inline-flex items-center text-[10px] text-[#71767b] bg-[#1a1a1e] px-1.5 py-0.2 rounded border border-[#27272a] ml-0.5"
-                >
-                  <Lock className="w-2.5 h-2.5 mr-0.5" /> Only me
-                </span>
-              )}
-            </div>
-          )}
-
-          <div className="flex items-center gap-1">
-            <Calendar className="w-3.5 h-3.5 text-[#89919d]" />
-            <span>
+          {/* 7. Joined Date */}
+          <div className="flex items-start gap-2.5">
+            <Calendar className="w-4 h-4 text-[#89919d] shrink-0 mt-0.5" />
+            <span className="break-words leading-relaxed">
               {profile?.created_at
                 ? `Joined ${new Date(profile.created_at).toLocaleDateString('en-US', {
                     month: 'long',
