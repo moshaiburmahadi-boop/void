@@ -269,11 +269,12 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
 
       // 3. Upload avatar image if new file selected
       let finalAvatarUrl: string | null = avatarPreview;
-      if (avatarFile && user?.id) {
+      const targetUserId = user?.id || profile?.id || 'current_user';
+      if (avatarFile) {
         const { url: uploadedAvatar, error: avErr } = await uploadProfileAsset(
           avatarFile,
           'avatars',
-          user.id,
+          targetUserId,
           'avatar'
         );
         if (avErr) {
@@ -288,11 +289,11 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
 
       // 4. Upload cover image if new file selected
       let finalCoverUrl: string | null = coverPreview;
-      if (coverFile && user?.id) {
+      if (coverFile) {
         const { url: uploadedCover, error: covErr } = await uploadProfileAsset(
           coverFile,
           'avatars',
-          user.id,
+          targetUserId,
           'cover'
         );
         if (covErr) {

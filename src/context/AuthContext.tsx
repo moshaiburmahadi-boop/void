@@ -35,6 +35,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Fetch or create profile for authenticated user
   const fetchUserProfile = async (userId: string, userEmail?: string, metadata?: Record<string, any>) => {
     if (!isSupabaseConfigured || isDemoMode) {
+      try {
+        const cached = localStorage.getItem('void_custom_profile');
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          setProfile({ ...CURRENT_USER, ...parsed });
+          return;
+        }
+      } catch (_) {}
       setProfile(CURRENT_USER);
       return;
     }
@@ -87,6 +95,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     } catch (err) {
       console.error('Failed to resolve user profile:', err);
+      try {
+        const cached = localStorage.getItem('void_custom_profile');
+        if (cached) {
+          setProfile({ ...CURRENT_USER, ...JSON.parse(cached) });
+          return;
+        }
+      } catch (_) {}
       setProfile(CURRENT_USER);
     }
   };
@@ -237,6 +252,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const merged = { ...profile, ...updatedData };
     setProfile(merged);
 
+    try {
+      localStorage.setItem('void_custom_profile', JSON.stringify(merged));
+    } catch (_) {}
+
     if (isSupabaseConfigured && user) {
       try {
         const { error } = await supabase
@@ -245,10 +264,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           .eq('id', user.id);
 
         if (error) {
-          console.error('Error updating Supabase profile:', error);
-          return { error };
+          console.warn('Full profile update warning, attempting core fields fallback:', error.message);
+          // Fallback: If newer optional schema columns don't exist yet on remote table, update core columns
+          const coreUpdate: Record<string, any> = {};
+          if (updatedData.username !== undefined) coreUpdate.username = updatedData.username;
+          if (updatedData.display_name !== undefined) coreUpdate.display_name = updatedData.display_name;
+          if (updatedData.bio !== undefined) coreUpdate.bio = updatedData.bio;
+          if (updatedData.location !== undefined) coreUpdate.location = updatedData.location;
+          if (updatedData.website !== undefined) coreUpdate.website = updatedData.website;
+          if (updatedData.avatar_url !== undefined) coreUpdate.avatar_url = updatedData.avatar_url;
+          if (updatedData.cover_url !== undefined) coreUpdate.cover_url = updatedData.cover_url;
+
+          const { error: fallbackError } = await supabase
+            .from('profiles')
+            .update(coreUpdate)
+            .eq('id', user.id);
+
+          if (fallbackError) {
+            console.error('Fallback profile update error:', fallbackError);
+            return { error: fallbackError };
+          }
         }
       } catch (err: any) {
+        console.error('Error updating profile in Supabase:', err);
         return { error: err };
       }
     }
