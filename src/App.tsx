@@ -25,7 +25,18 @@ import { Loader2 } from 'lucide-react';
 const MainApp: React.FC = () => {
   const { user, profile, loading, isDemoMode } = useAuth();
   const [activeTab, setActiveTab] = useState<ActiveTab>('feed');
+  const [visitedTabs, setVisitedTabs] = useState<Set<ActiveTab>>(() => new Set(['feed']));
   const [posts, setPosts] = useState<Post[]>(INITIAL_POSTS);
+
+  // Mark tab as visited whenever activeTab changes
+  useEffect(() => {
+    setVisitedTabs((prev) => {
+      if (prev.has(activeTab)) return prev;
+      const next = new Set(prev);
+      next.add(activeTab);
+      return next;
+    });
+  }, [activeTab]);
   const [isComposeOpen, setIsComposeOpen] = useState(false);
   const [isSQLModalOpen, setIsSQLModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
@@ -159,42 +170,50 @@ const MainApp: React.FC = () => {
 
         {/* Center Main Content (Responsive Feed / Messages / Explore / Notifications / Profile) */}
         <div className="flex-1 flex justify-start min-h-screen w-full">
-          {activeTab === 'feed' && (
+          <div className={activeTab === 'feed' ? 'contents' : 'hidden'}>
             <HomeFeed
               posts={posts}
               setPosts={setPosts}
               onOpenCompose={() => setIsComposeOpen(true)}
               onViewProfile={handleViewProfile}
             />
+          </div>
+
+          {visitedTabs.has('explore') && (
+            <div className={activeTab === 'explore' ? 'contents' : 'hidden'}>
+              <ExploreView
+                initialSearchQuery={searchQuery}
+                onViewProfile={handleViewProfile}
+              />
+            </div>
           )}
 
-          {activeTab === 'explore' && (
-            <ExploreView
-              initialSearchQuery={searchQuery}
-              onViewProfile={handleViewProfile}
-            />
+          {visitedTabs.has('notifications') && (
+            <div className={activeTab === 'notifications' ? 'contents' : 'hidden'}>
+              <NotificationsView onViewProfile={handleViewProfile} />
+            </div>
           )}
 
-          {activeTab === 'notifications' && (
-            <NotificationsView onViewProfile={handleViewProfile} />
+          {visitedTabs.has('messages') && (
+            <div className={activeTab === 'messages' ? 'contents' : 'hidden'}>
+              <MessagesView
+                initialPartner={directMessageUser}
+                onUnreadChange={setUnreadMessages}
+                onViewProfile={handleViewProfile}
+                onMobileChatToggle={setIsMobileChatOpen}
+              />
+            </div>
           )}
 
-          {activeTab === 'messages' && (
-            <MessagesView
-              initialPartner={directMessageUser}
-              onUnreadChange={setUnreadMessages}
-              onViewProfile={handleViewProfile}
-              onMobileChatToggle={setIsMobileChatOpen}
-            />
-          )}
-
-          {activeTab === 'profile' && (
-            <ProfileView
-              posts={posts}
-              onBackToFeed={() => setActiveTab('feed')}
-              onDeletePost={(postId) => setPosts((prev) => prev.filter((p) => p.id !== postId))}
-              onViewProfile={handleViewProfile}
-            />
+          {visitedTabs.has('profile') && (
+            <div className={activeTab === 'profile' ? 'contents' : 'hidden'}>
+              <ProfileView
+                posts={posts}
+                onBackToFeed={() => setActiveTab('feed')}
+                onDeletePost={(postId) => setPosts((prev) => prev.filter((p) => p.id !== postId))}
+                onViewProfile={handleViewProfile}
+              />
+            </div>
           )}
 
           {/* Right Sidebar (Hidden on messages tab or small screens) */}

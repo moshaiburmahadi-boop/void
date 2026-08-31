@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
+import { dataCache } from '../../lib/dataCache';
 import { useAuth } from '../../context/AuthContext';
 import { useFollow } from '../../context/FollowContext';
 import { Profile, Post } from '../../types';
@@ -17,7 +18,10 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
   const { profile } = useAuth();
   const { isFollowing, toggleFollow } = useFollow();
   const [search, setSearch] = useState(initialSearchQuery);
-  const [matchedUsers, setMatchedUsers] = useState<Profile[]>([]);
+  const [matchedUsers, setMatchedUsers] = useState<Profile[]>(() => {
+    const cached = dataCache.getRecommendedMembers();
+    return cached || [];
+  });
   const [matchedPosts, setMatchedPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -30,7 +34,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
           // Search profiles
           const { data: profiles } = await supabase
             .from('profiles')
-            .select('*')
+            .select('id, username, display_name, avatar_url, verified, occupation, location')
             .or(`username.ilike.%${search}%,display_name.ilike.%${search}%`)
             .limit(10);
 
@@ -42,18 +46,38 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
           // Search posts
           const { data: posts } = await supabase
             .from('posts')
-            .select('*, profiles:user_id(*)')
+            .select('id, user_id, content, image_url, created_at, likes_count, comments_count, profiles:user_id(id, username, display_name, avatar_url, verified)')
             .ilike('content', `%${search}%`)
             .limit(10);
-          setMatchedPosts((posts as Post[]) || []);
+          
+          if (posts) {
+            const formattedPosts: Post[] = (posts as unknown as any[]).map((p) => ({
+              ...p,
+              profiles: Array.isArray(p.profiles) ? p.profiles[0] : p.profiles,
+            }));
+            setMatchedPosts(formattedPosts);
+          } else {
+            setMatchedPosts([]);
+          }
         } else {
           // Load suggested real users
-          let query = supabase.from('profiles').select('*').limit(10);
-          if (profile?.id) {
-            query = query.neq('id', profile.id);
+          const cached = dataCache.getRecommendedMembers();
+          if (cached && cached.length > 0) {
+            setMatchedUsers(cached);
+          } else {
+            let query = supabase
+              .from('profiles')
+              .select('id, username, display_name, avatar_url, verified, occupation, location')
+              .limit(10);
+            if (profile?.id) {
+              query = query.neq('id', profile.id);
+            }
+            const { data: profiles } = await query;
+            if (profiles) {
+              setMatchedUsers(profiles as Profile[]);
+              dataCache.setRecommendedMembers(profiles as Profile[]);
+            }
           }
-          const { data: profiles } = await query;
-          setMatchedUsers((profiles as Profile[]) || []);
           setMatchedPosts([]);
         }
       } catch (err) {

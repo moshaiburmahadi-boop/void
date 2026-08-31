@@ -22,7 +22,7 @@ interface PostItemProps {
   onPostUpdated?: (updatedPost: Post) => void;
 }
 
-export const PostItem: React.FC<PostItemProps> = ({
+const PostItemComponent: React.FC<PostItemProps> = ({
   post,
   onDeletePost,
   onViewProfile,
@@ -30,7 +30,7 @@ export const PostItem: React.FC<PostItemProps> = ({
 }) => {
   const { profile } = useAuth();
 
-  // Local interactive states initialized from post data
+  // Initialize local interactive states from post data without redundant network queries on mount
   const [likesCount, setLikesCount] = useState<number>(post.likes_count ?? 0);
   const [hasLiked, setHasLiked] = useState<boolean>(Boolean(post.user_has_liked));
   const [repliesCount, setRepliesCount] = useState<number>(post.replies_count ?? 0);
@@ -57,57 +57,15 @@ export const PostItem: React.FC<PostItemProps> = ({
 
   const isAuthor = profile && (post.user_id === profile.id || author.username === profile.username);
 
-  // Fetch real dynamic like count & user liked status from Supabase directly
+  // Sync state if post prop changes
   useEffect(() => {
-    let isMounted = true;
-    if (!isSupabaseConfigured || !post.id) return;
-
-    const fetchDynamicStats = async () => {
-      try {
-        // 1. Fetch exact like count
-        const { count: realLikes, error: likesError } = await supabase
-          .from('likes')
-          .select('*', { count: 'exact', head: true })
-          .eq('post_id', post.id);
-
-        if (isMounted && !likesError && typeof realLikes === 'number') {
-          setLikesCount(realLikes);
-        }
-
-        // 2. Fetch whether current user liked this post
-        if (profile?.id) {
-          const { data: userLike, error: userLikeErr } = await supabase
-            .from('likes')
-            .select('id')
-            .eq('post_id', post.id)
-            .eq('user_id', profile.id)
-            .maybeSingle();
-
-          if (isMounted && !userLikeErr) {
-            setHasLiked(Boolean(userLike));
-          }
-        }
-
-        // 3. Fetch exact comments count
-        const { count: realComments, error: commentsError } = await supabase
-          .from('comments')
-          .select('*', { count: 'exact', head: true })
-          .eq('post_id', post.id);
-
-        if (isMounted && !commentsError && typeof realComments === 'number') {
-          setRepliesCount(realComments);
-        }
-      } catch (err) {
-        console.warn('Error fetching dynamic post reactions:', err);
-      }
-    };
-
-    fetchDynamicStats();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [post.id, profile?.id]);
+    if (typeof post.likes_count === 'number') setLikesCount(post.likes_count);
+    if (typeof post.user_has_liked === 'boolean') setHasLiked(post.user_has_liked);
+    if (typeof post.replies_count === 'number') setRepliesCount(post.replies_count);
+    if (typeof post.reposts_count === 'number') setRepostsCount(post.reposts_count);
+    if (typeof post.user_has_reposted === 'boolean') setHasReposted(post.user_has_reposted);
+    if (typeof post.user_has_bookmarked === 'boolean') setHasBookmarked(post.user_has_bookmarked);
+  }, [post.likes_count, post.user_has_liked, post.replies_count, post.reposts_count, post.user_has_reposted, post.user_has_bookmarked]);
 
   // Load comments when drawer is opened
   useEffect(() => {
@@ -300,6 +258,8 @@ export const PostItem: React.FC<PostItemProps> = ({
       <img
         src={author.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80'}
         alt={author.display_name || author.username}
+        loading="lazy"
+        decoding="async"
         onClick={(e) => {
           e.stopPropagation();
           if (onViewProfile && post.profiles) {
@@ -361,6 +321,8 @@ export const PostItem: React.FC<PostItemProps> = ({
             <img
               src={post.image_url}
               alt="Post media"
+              loading="lazy"
+              decoding="async"
               className="w-full h-full object-cover max-h-[340px]"
             />
           </div>
@@ -524,3 +486,5 @@ export const PostItem: React.FC<PostItemProps> = ({
     </article>
   );
 };
+
+export const PostItem = React.memo(PostItemComponent);

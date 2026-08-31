@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useFollow } from '../../context/FollowContext';
 import { useCall } from '../../context/CallContext';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
+import { dataCache } from '../../lib/dataCache';
 import { Notification, Profile } from '../../types';
 import {
   Heart,
@@ -32,12 +33,23 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({ onViewProf
   const { isFollowing, toggleFollow } = useFollow();
   const { startCall } = useCall();
   const [tab, setTab] = useState<'all' | 'mentions'>('all');
-  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [notifications, setNotifications] = useState<Notification[]>(() => {
+    const cached = dataCache.getNotifications();
+    return cached ? cached.notifications : [];
+  });
+  const initialLoadedRef = useRef(false);
 
   useEffect(() => {
     if (!profile?.id) return;
 
     const fetchNotifications = async () => {
+      // Check cache first for instant display
+      const cached = dataCache.getNotifications();
+      if (cached && !cached.isStale && initialLoadedRef.current) {
+        setNotifications(cached.notifications);
+        return;
+      }
+
       if (!isSupabaseConfigured) {
         // Load local notifications broadcast
         try {
@@ -46,6 +58,7 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({ onViewProf
           if (stored) {
             const parsed = JSON.parse(stored);
             setNotifications(parsed);
+            dataCache.setNotifications(parsed);
           }
         } catch (e) {
           console.warn('Local notifs read err:', e);
@@ -61,18 +74,22 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({ onViewProf
             user_id,
             actor_id,
             type,
+            post_id,
             created_at,
-            actor_profile:actor_id(*)
+            actor_profile:actor_id(id, username, display_name, avatar_url, verified)
           `)
           .eq('user_id', profile.id)
-          .order('created_at', { ascending: false });
+          .order('created_at', { ascending: false })
+          .limit(30);
 
         if (!error && data) {
-          const formatted = (data as unknown as any[]).map((n) => ({
+          const formatted: Notification[] = (data as unknown as any[]).map((n) => ({
             ...n,
             actor_profile: Array.isArray(n.actor_profile) ? n.actor_profile[0] : n.actor_profile,
           }));
           setNotifications(formatted);
+          dataCache.setNotifications(formatted);
+          initialLoadedRef.current = true;
         }
       } catch (err) {
         console.warn('Error fetching notifications:', err);
@@ -94,31 +111,42 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({ onViewProf
         },
         async (payload) => {
           const newNotif = payload.new as Notification;
-          let actorProfile = null;
-          try {
-            const { data } = await supabase
-              .from('profiles')
-              .select('*')
-              .eq('id', newNotif.actor_id)
-              .single();
-            actorProfile = data;
-          } catch (e) {
-            console.warn(e);
+          
+          // Check cached actor profile
+          let actorProfile = dataCache.getProfile(newNotif.actor_id);
+          if (!actorProfile) {
+            try {
+              const { data } = await supabase
+                .from('profiles')
+                .select('id, username, display_name, avatar_url, verified')
+                .eq('id', newNotif.actor_id)
+                .single();
+              if (data) {
+                actorProfile = data as Profile;
+                dataCache.setProfile(actorProfile);
+              }
+            } catch (e) {
+              console.warn(e);
+            }
           }
 
-          setNotifications((prev) => [
-            {
-              ...newNotif,
-              actor_profile: actorProfile || {
-                id: newNotif.actor_id,
-                username: 'member',
-                display_name: 'Member',
-                avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80',
-                created_at: new Date().toISOString(),
-              },
+          const notificationWithProfile: Notification = {
+            ...newNotif,
+            actor_profile: actorProfile || {
+              id: newNotif.actor_id,
+              username: 'member',
+              display_name: 'Member',
+              avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80',
+              created_at: new Date().toISOString(),
             },
-            ...prev,
-          ]);
+          };
+
+          setNotifications((prev) => {
+            if (prev.some((n) => n.id === notificationWithProfile.id)) return prev;
+            const updated = [notificationWithProfile, ...prev];
+            dataCache.prependNotification(notificationWithProfile);
+            return updated;
+          });
         }
       )
       .subscribe();

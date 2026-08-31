@@ -31,6 +31,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { useCall } from '../../context/CallContext';
 import { dispatchPushNotification } from '../../utils/pushNotifications';
 import { formatRelativeTime } from '../../utils/date';
+import { dataCache } from '../../lib/dataCache';
 
 const QUICK_EMOJIS = ['❤️', '😂', '👍', '😮', '😢', '🔥'];
 
@@ -55,9 +56,18 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
   const { profile } = useAuth();
   const { isFollowing, followingMap, followedUserIds } = useFollow();
   const { startCall } = useCall();
-  const [conversations, setConversations] = useState<ConversationItem[]>([]);
+  const [conversations, setConversations] = useState<ConversationItem[]>(() => {
+    const cached = dataCache.getConversations();
+    return cached ? cached.items : [];
+  });
   const [activePartner, setActivePartner] = useState<Profile | null>(initialPartner || null);
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<Message[]>(() => {
+    if (initialPartner?.id) {
+      const cached = dataCache.getMessages(initialPartner.id);
+      return cached ? cached.messages : [];
+    }
+    return [];
+  });
   const [inputText, setInputText] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [showMobileChat, setShowMobileChat] = useState(Boolean(initialPartner));
@@ -276,6 +286,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
         });
 
         setConversations(items);
+        dataCache.setConversations(items);
 
         // Keep activePartner updated if already chosen
         setActivePartner((currentActive) => {
@@ -439,6 +450,12 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
     setIsPartnerTyping(false);
     setReplyingTo(null);
 
+    // Render from cache immediately if available
+    const cachedEntry = dataCache.getMessages(activePartner.id);
+    if (cachedEntry) {
+      setMessages(cachedEntry.messages);
+    }
+
     if (isSupabaseConfigured) {
       const fetchHistory = async () => {
         try {
@@ -458,14 +475,15 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
               call_type,
               duration_seconds,
               created_at,
-              sender_profile:sender_id(*),
-              receiver_profile:receiver_id(*),
+              sender_profile:sender_id(id, username, display_name, avatar_url, verified),
+              receiver_profile:receiver_id(id, username, display_name, avatar_url, verified),
               reactions:message_reactions(*)
             `)
             .or(
               `and(sender_id.eq.${profile.id},receiver_id.eq.${activePartner.id}),and(sender_id.eq.${activePartner.id},receiver_id.eq.${profile.id})`
             )
-            .order('created_at', { ascending: true });
+            .order('created_at', { ascending: true })
+            .limit(60);
 
           if (!error && data) {
             // Filter out messages marked unsent or deleted for current user
@@ -505,6 +523,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
             });
 
             setMessages(resolved);
+            dataCache.setMessages(activePartner.id, resolved);
           }
         } catch (err) {
           console.warn('Could not fetch messages:', err);

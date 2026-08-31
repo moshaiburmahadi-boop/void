@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useFollow } from '../../context/FollowContext';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { Post, Profile } from '../../types';
 import { INITIAL_POSTS } from '../../data/mockData';
+import { dataCache } from '../../lib/dataCache';
 import { MobileSearchModal } from '../Search/MobileSearchModal';
 import { PostItem } from './PostItem';
 import {
@@ -13,6 +14,7 @@ import {
   RotateCw,
   Search,
   Users,
+  Loader2,
 } from 'lucide-react';
 
 interface HomeFeedProps {
@@ -21,6 +23,8 @@ interface HomeFeedProps {
   onOpenCompose: () => void;
   onViewProfile?: (user: Profile) => void;
 }
+
+const PAGE_SIZE = 20;
 
 export const HomeFeed: React.FC<HomeFeedProps> = ({
   posts,
@@ -36,12 +40,27 @@ export const HomeFeed: React.FC<HomeFeedProps> = ({
   const [showImageInput, setShowImageInput] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [hasMorePosts, setHasMorePosts] = useState(true);
   const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
+  const initialLoadedRef = useRef(false);
 
-  // Fetch posts from Supabase on mount
-  const fetchPosts = async () => {
+  // Fetch posts from Supabase with caching & selective fields
+  const fetchPosts = useCallback(async (isManualRefresh = false) => {
     if (!isSupabaseConfigured) return;
-    setIsRefreshing(true);
+    
+    // If not manual refresh, check cache first
+    if (!isManualRefresh) {
+      const cached = dataCache.getFeed();
+      if (cached) {
+        setPosts(cached.posts);
+        if (!cached.isStale && initialLoadedRef.current) {
+          return;
+        }
+      }
+    }
+
+    if (isManualRefresh) setIsRefreshing(true);
     try {
       const { data, error } = await supabase
         .from('posts')
@@ -51,22 +70,26 @@ export const HomeFeed: React.FC<HomeFeedProps> = ({
           content,
           image_url,
           created_at,
-          profiles:user_id (*)
+          profiles:user_id (id, username, display_name, avatar_url, verified, occupation, location)
         `)
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .limit(PAGE_SIZE);
 
       if (error) {
         console.warn('Error fetching posts from Supabase:', error);
       } else if (data) {
-        // Also fetch user's likes
+        const postIds = data.map((p: any) => p.id);
+        
+        // Single batched fetch for current user likes
         let userLikes = new Set<string>();
-        if (profile?.id) {
+        if (profile?.id && postIds.length > 0) {
           const { data: likesData } = await supabase
             .from('likes')
             .select('post_id')
-            .eq('user_id', profile.id);
+            .eq('user_id', profile.id)
+            .in('post_id', postIds);
           if (likesData) {
-            userLikes = new Set(likesData.map((l) => l.post_id));
+            userLikes = new Set(likesData.map((l: any) => l.post_id));
           }
         }
 
@@ -79,20 +102,90 @@ export const HomeFeed: React.FC<HomeFeedProps> = ({
           reposts_count: 0,
           views_count: 1,
         }));
+
         setPosts(formattedPosts);
+        dataCache.setFeed(formattedPosts);
+        setHasMorePosts(formattedPosts.length >= PAGE_SIZE);
+        initialLoadedRef.current = true;
       }
     } catch (err) {
       console.error('Failed to load posts:', err);
     } finally {
       setIsRefreshing(false);
     }
+  }, [profile?.id, setPosts]);
+
+  // Load more older posts on scroll / demand
+  const handleLoadMore = async () => {
+    if (!isSupabaseConfigured || isLoadingMore || !hasMorePosts || posts.length === 0) return;
+
+    const oldestPost = posts[posts.length - 1];
+    if (!oldestPost?.created_at) return;
+
+    setIsLoadingMore(true);
+    try {
+      const { data, error } = await supabase
+        .from('posts')
+        .select(`
+          id,
+          user_id,
+          content,
+          image_url,
+          created_at,
+          profiles:user_id (id, username, display_name, avatar_url, verified, occupation, location)
+        `)
+        .lt('created_at', oldestPost.created_at)
+        .order('created_at', { ascending: false })
+        .limit(PAGE_SIZE);
+
+      if (!error && data && data.length > 0) {
+        const postIds = data.map((p: any) => p.id);
+        let userLikes = new Set<string>();
+        if (profile?.id && postIds.length > 0) {
+          const { data: likesData } = await supabase
+            .from('likes')
+            .select('post_id')
+            .eq('user_id', profile.id)
+            .in('post_id', postIds);
+          if (likesData) {
+            userLikes = new Set(likesData.map((l: any) => l.post_id));
+          }
+        }
+
+        const newFormatted: Post[] = (data as unknown as any[]).map((p) => ({
+          ...p,
+          profiles: Array.isArray(p.profiles) ? p.profiles[0] : p.profiles,
+          likes_count: userLikes.has(p.id) ? 1 : 0,
+          user_has_liked: userLikes.has(p.id),
+          replies_count: 0,
+          reposts_count: 0,
+          views_count: 1,
+        }));
+
+        setPosts((prev) => {
+          const existingIds = new Set(prev.map((p) => p.id));
+          const filtered = newFormatted.filter((p) => !existingIds.has(p.id));
+          const updated = [...prev, ...filtered];
+          dataCache.setFeed(updated);
+          return updated;
+        });
+
+        setHasMorePosts(data.length >= PAGE_SIZE);
+      } else {
+        setHasMorePosts(false);
+      }
+    } catch (err) {
+      console.warn('Error loading older posts:', err);
+    } finally {
+      setIsLoadingMore(false);
+    }
   };
 
   useEffect(() => {
     fetchPosts();
-  }, [profile?.id]);
+  }, [fetchPosts]);
 
-  // Realtime subscription: broadcast all posts to all users instantly
+  // Realtime subscription: broadcast new posts
   useEffect(() => {
     if (!isSupabaseConfigured) return;
 
@@ -107,12 +200,20 @@ export const HomeFeed: React.FC<HomeFeedProps> = ({
         },
         async (payload) => {
           const newPost = payload.new as Post;
-          // Fetch author details for the newly inserted post
-          const { data: authorData } = await supabase
-            .from('profiles')
-            .select('*')
-            .eq('id', newPost.user_id)
-            .single();
+          
+          // Check local profile cache first
+          let authorData = dataCache.getProfile(newPost.user_id);
+          if (!authorData) {
+            const { data } = await supabase
+              .from('profiles')
+              .select('id, username, display_name, avatar_url, verified, occupation, location')
+              .eq('id', newPost.user_id)
+              .single();
+            if (data) {
+              authorData = data as Profile;
+              dataCache.setProfile(authorData);
+            }
+          }
 
           const postWithAuthor: Post = {
             ...newPost,
@@ -126,7 +227,9 @@ export const HomeFeed: React.FC<HomeFeedProps> = ({
 
           setPosts((prev) => {
             if (prev.some((p) => p.id === postWithAuthor.id)) return prev;
-            return [postWithAuthor, ...prev];
+            const updated = [postWithAuthor, ...prev];
+            dataCache.setFeed(updated);
+            return updated;
           });
         }
       )
@@ -140,7 +243,11 @@ export const HomeFeed: React.FC<HomeFeedProps> = ({
         (payload) => {
           const deletedId = (payload.old as { id: string })?.id;
           if (deletedId) {
-            setPosts((prev) => prev.filter((p) => p.id !== deletedId));
+            setPosts((prev) => {
+              const updated = prev.filter((p) => p.id !== deletedId);
+              dataCache.setFeed(updated);
+              return updated;
+            });
           }
         }
       )
@@ -149,7 +256,7 @@ export const HomeFeed: React.FC<HomeFeedProps> = ({
     return () => {
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [setPosts]);
 
   const handleInlineCompose = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -430,15 +537,36 @@ export const HomeFeed: React.FC<HomeFeedProps> = ({
             </div>
           )
         ) : (
-          displayedPosts.map((post) => (
-            <PostItem
-              key={post.id}
-              post={post}
-              onDeletePost={handleDeletePost}
-              onViewProfile={onViewProfile}
-              onPostUpdated={handlePostUpdated}
-            />
-          ))
+          <>
+            {displayedPosts.map((post) => (
+              <PostItem
+                key={post.id}
+                post={post}
+                onDeletePost={handleDeletePost}
+                onViewProfile={onViewProfile}
+                onPostUpdated={handlePostUpdated}
+              />
+            ))}
+
+            {hasMorePosts && (
+              <div className="p-4 flex justify-center">
+                <button
+                  onClick={handleLoadMore}
+                  disabled={isLoadingMore}
+                  className="py-2.5 px-6 rounded-full bg-[#18181b] hover:bg-[#27272a] text-xs font-semibold text-[#1d9bf0] hover:text-white border border-[#27272a] transition-all cursor-pointer flex items-center gap-2"
+                >
+                  {isLoadingMore ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      Loading older posts...
+                    </>
+                  ) : (
+                    'Load More Posts'
+                  )}
+                </button>
+              </div>
+            )}
+          </>
         )}
       </div>
 

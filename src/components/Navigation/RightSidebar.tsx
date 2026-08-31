@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
+import { dataCache } from '../../lib/dataCache';
 import { useAuth } from '../../context/AuthContext';
 import { useFollow } from '../../context/FollowContext';
 import { Profile } from '../../types';
@@ -17,7 +18,10 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ onSearch, onViewProf
   const [searchResults, setSearchResults] = useState<Profile[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
-  const [realMembers, setRealMembers] = useState<Profile[]>([]);
+  const [realMembers, setRealMembers] = useState<Profile[]>(() => {
+    const cached = dataCache.getRecommendedMembers();
+    return cached || [];
+  });
   const [isLoadingMembers, setIsLoadingMembers] = useState(false);
   const searchContainerRef = useRef<HTMLDivElement>(null);
 
@@ -36,8 +40,14 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ onSearch, onViewProf
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Fetch ONLY real users from Supabase profiles table
+  // Fetch ONLY real users from Supabase profiles table with caching & selective fields
   const fetchRealMembers = async () => {
+    const cached = dataCache.getRecommendedMembers();
+    if (cached && cached.length > 0) {
+      setRealMembers(cached);
+      return;
+    }
+
     if (!isSupabaseConfigured) {
       setRealMembers([]);
       return;
@@ -47,9 +57,9 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ onSearch, onViewProf
     try {
       let query = supabase
         .from('profiles')
-        .select('*')
+        .select('id, username, display_name, avatar_url, verified, occupation, location')
         .order('created_at', { ascending: false })
-        .limit(20);
+        .limit(15);
 
       if (profile?.id) {
         query = query.neq('id', profile.id);
@@ -58,6 +68,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ onSearch, onViewProf
       const { data, error } = await query;
       if (!error && data) {
         setRealMembers(data as Profile[]);
+        dataCache.setRecommendedMembers(data as Profile[]);
       } else {
         setRealMembers([]);
       }
