@@ -321,6 +321,38 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
 
     const globalInboxChannel = supabase
       .channel(`global_inbox_${profile.id}`)
+      .on('broadcast', { event: 'inbox_message' }, (eventPayload) => {
+        const newMsg = eventPayload?.payload as Message;
+        if (!newMsg || newMsg.is_unsent) return;
+        if (
+          Array.isArray(newMsg.deleted_for_user_ids) &&
+          newMsg.deleted_for_user_ids.includes(profile.id)
+        ) {
+          return;
+        }
+
+        const isRecipient = newMsg.receiver_id === profile.id;
+        const isSender = newMsg.sender_id === profile.id;
+        if (!isRecipient && !isSender) return;
+
+        const partnerId = isSender ? newMsg.receiver_id : newMsg.sender_id;
+
+        // Update conversation list last message and move partner to top
+        setConversations((prev) => {
+          const existing = prev.find((c) => c.partner.id === partnerId);
+          if (existing) {
+            const updated: ConversationItem = {
+              ...existing,
+              lastMessage: newMsg,
+            };
+            return [updated, ...prev.filter((c) => c.partner.id !== partnerId)];
+          } else {
+            // Partner not in current list -> refresh
+            fetchUsersAndConversations();
+            return prev;
+          }
+        });
+      })
       .on(
         'postgres_changes',
         {
@@ -538,7 +570,88 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
       channelRef.current = channel;
 
       channel
-        // Listen for new messages inserted in DB
+        // 1. Instant WebSocket broadcast for new message (Zero latency)
+        .on('broadcast', { event: 'new_message' }, (eventPayload) => {
+          const incomingMsg = eventPayload?.payload as Message;
+          if (!incomingMsg || incomingMsg.sender_id === profile.id) return;
+
+          setIsPartnerTyping(false);
+          if (partnerTypingTimeoutRef.current) {
+            clearTimeout(partnerTypingTimeoutRef.current);
+          }
+
+          setMessages((prev) => {
+            // Deduplicate if already present (e.g. from postgres_changes or temp)
+            if (prev.some((m) => m.id === incomingMsg.id)) {
+              return prev;
+            }
+            const updated = [...prev, incomingMsg];
+            dataCache.setMessages(activePartner.id, updated);
+            return updated;
+          });
+
+          // Update conversation item list
+          setConversations((prev) => {
+            const existing = prev.find((c) => c.partner.id === activePartner.id);
+            if (existing) {
+              const updated: ConversationItem = { ...existing, lastMessage: incomingMsg };
+              return [updated, ...prev.filter((c) => c.partner.id !== activePartner.id)];
+            }
+            return prev;
+          });
+        })
+        // 2. Broadcast for message deletion (unsend)
+        .on('broadcast', { event: 'delete_message' }, (eventPayload) => {
+          const { messageId } = eventPayload?.payload || {};
+          if (messageId) {
+            setMessages((prev) => {
+              const filtered = prev.filter((m) => m.id !== messageId);
+              dataCache.setMessages(activePartner.id, filtered);
+              return filtered;
+            });
+          }
+        })
+        // 3. Broadcast for message edit
+        .on('broadcast', { event: 'update_message' }, (eventPayload) => {
+          const { messageId, content, is_edited } = eventPayload?.payload || {};
+          if (messageId) {
+            setMessages((prev) => {
+              const updated = prev.map((m) =>
+                m.id === messageId ? { ...m, content, is_edited: Boolean(is_edited) } : m
+              );
+              dataCache.setMessages(activePartner.id, updated);
+              return updated;
+            });
+          }
+        })
+        // 4. Broadcast for toggle reaction
+        .on('broadcast', { event: 'toggle_reaction' }, (eventPayload) => {
+          const { messageId, reaction, action } = eventPayload?.payload || {};
+          if (messageId && reaction) {
+            setMessages((prev) => {
+              const updated = prev.map((m) => {
+                if (m.id !== messageId) return m;
+                const currentReactions = m.reactions || [];
+                let nextReactions: MessageReaction[];
+                if (action === 'remove') {
+                  nextReactions = currentReactions.filter(
+                    (r) => !(r.user_id === reaction.user_id && r.emoji === reaction.emoji)
+                  );
+                } else {
+                  if (currentReactions.some((r) => r.user_id === reaction.user_id && r.emoji === reaction.emoji)) {
+                    nextReactions = currentReactions;
+                  } else {
+                    nextReactions = [...currentReactions, reaction];
+                  }
+                }
+                return { ...m, reactions: nextReactions };
+              });
+              dataCache.setMessages(activePartner.id, updated);
+              return updated;
+            });
+          }
+        })
+        // 5. Listen for new messages inserted in DB (Postgres Changes backup)
         .on(
           'postgres_changes',
           {
@@ -601,25 +714,26 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                     receiver_profile: newMsg.receiver_id === profile.id ? profile : activePartner,
                     reply_to_message: replyQuote || updated[tempIndex].reply_to_message,
                   };
+                  dataCache.setMessages(activePartner.id, updated);
                   return updated;
                 }
 
                 // New incoming message
-                return [
-                  ...prev,
-                  {
-                    ...newMsg,
-                    reactions: [],
-                    sender_profile: newMsg.sender_id === profile.id ? profile : activePartner,
-                    receiver_profile: newMsg.receiver_id === profile.id ? profile : activePartner,
-                    reply_to_message: replyQuote,
-                  },
-                ];
+                const newFullMsg: Message = {
+                  ...newMsg,
+                  reactions: [],
+                  sender_profile: newMsg.sender_id === profile.id ? profile : activePartner,
+                  receiver_profile: newMsg.receiver_id === profile.id ? profile : activePartner,
+                  reply_to_message: replyQuote,
+                };
+                const updated = [...prev, newFullMsg];
+                dataCache.setMessages(activePartner.id, updated);
+                return updated;
               });
             }
           }
         )
-        // Listen for Realtime message deletions (Unsend / Delete for everyone)
+        // 6. Listen for Realtime message deletions (Unsend / Delete for everyone)
         .on(
           'postgres_changes',
           {
@@ -630,11 +744,15 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
           (payload) => {
             const deletedId = (payload.old as { id: string })?.id;
             if (deletedId) {
-              setMessages((prev) => prev.filter((m) => m.id !== deletedId));
+              setMessages((prev) => {
+                const filtered = prev.filter((m) => m.id !== deletedId);
+                dataCache.setMessages(activePartner.id, filtered);
+                return filtered;
+              });
             }
           }
         )
-        // Listen for Realtime message updates (e.g. is_unsent, is_edited, or deleted_for_user_ids)
+        // 7. Listen for Realtime message updates (e.g. is_unsent, is_edited, or deleted_for_user_ids)
         .on(
           'postgres_changes',
           {
@@ -645,15 +763,23 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
           (payload) => {
             const updated = payload.new as Message;
             if (updated.is_unsent || (Array.isArray(updated.deleted_for_user_ids) && updated.deleted_for_user_ids.includes(profile.id))) {
-              setMessages((prev) => prev.filter((m) => m.id !== updated.id));
+              setMessages((prev) => {
+                const filtered = prev.filter((m) => m.id !== updated.id);
+                dataCache.setMessages(activePartner.id, filtered);
+                return filtered;
+              });
             } else {
-              setMessages((prev) =>
-                prev.map((m) => (m.id === updated.id ? { ...m, ...updated, reactions: m.reactions || [] } : m))
-              );
+              setMessages((prev) => {
+                const updatedList = prev.map((m) =>
+                  m.id === updated.id ? { ...m, ...updated, reactions: m.reactions || [] } : m
+                );
+                dataCache.setMessages(activePartner.id, updatedList);
+                return updatedList;
+              });
             }
           }
         )
-        // Listen for Realtime message reaction inserts
+        // 8. Listen for Realtime message reaction inserts
         .on(
           'postgres_changes',
           {
@@ -664,8 +790,8 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
           (payload) => {
             const newReaction = payload.new as MessageReaction;
             if (newReaction && newReaction.message_id) {
-              setMessages((prev) =>
-                prev.map((m) => {
+              setMessages((prev) => {
+                const updated = prev.map((m) => {
                   if (m.id !== newReaction.message_id) return m;
                   const existing = m.reactions || [];
                   if (existing.some((r) => r.id === newReaction.id || (r.user_id === newReaction.user_id && r.emoji === newReaction.emoji))) {
@@ -675,12 +801,14 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                     ...m,
                     reactions: [...existing, newReaction],
                   };
-                })
-              );
+                });
+                dataCache.setMessages(activePartner.id, updated);
+                return updated;
+              });
             }
           }
         )
-        // Listen for Realtime message reaction deletes
+        // 9. Listen for Realtime message reaction deletes
         .on(
           'postgres_changes',
           {
@@ -691,8 +819,8 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
           (payload) => {
             const oldReaction = payload.old as MessageReaction;
             if (oldReaction) {
-              setMessages((prev) =>
-                prev.map((m) => {
+              setMessages((prev) => {
+                const updated = prev.map((m) => {
                   if (!m.reactions || m.reactions.length === 0) return m;
                   const filtered = m.reactions.filter((r) => {
                     if (oldReaction.id && r.id) {
@@ -707,12 +835,14 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                     ...m,
                     reactions: filtered,
                   };
-                })
-              );
+                });
+                dataCache.setMessages(activePartner.id, updated);
+                return updated;
+              });
             }
           }
         )
-        // Listen for realtime typing broadcast from partner
+        // 10. Listen for realtime typing broadcast from partner
         .on('broadcast', { event: 'typing' }, (eventPayload) => {
           const { userId, isTyping } = eventPayload?.payload || {};
           if (userId === activePartner.id) {
@@ -815,9 +945,20 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
     setInputText('');
 
     // Optimistically update message in local state
-    setMessages((prev) =>
-      prev.map((m) => (m.id === targetMsgId ? { ...m, content: newContent, is_edited: true } : m))
-    );
+    setMessages((prev) => {
+      const updated = prev.map((m) => (m.id === targetMsgId ? { ...m, content: newContent, is_edited: true } : m));
+      if (activePartner) dataCache.setMessages(activePartner.id, updated);
+      return updated;
+    });
+
+    // Realtime broadcast to partner
+    if (channelRef.current) {
+      channelRef.current.send({
+        type: 'broadcast',
+        event: 'update_message',
+        payload: { messageId: targetMsgId, content: newContent, is_edited: true },
+      });
+    }
 
     if (isSupabaseConfigured) {
       try {
@@ -851,24 +992,40 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
     );
 
     let updatedReactions: MessageReaction[];
+    const targetReaction: MessageReaction = {
+      id: `temp_react_${Date.now()}`,
+      message_id: msg.id,
+      user_id: profile.id,
+      emoji,
+    };
+
     if (hasReacted) {
       updatedReactions = existingReactions.filter(
         (r) => !(r.user_id === profile.id && r.emoji === emoji)
       );
     } else {
-      const optimisticReaction: MessageReaction = {
-        id: `temp_react_${Date.now()}`,
-        message_id: msg.id,
-        user_id: profile.id,
-        emoji,
-      };
-      updatedReactions = [...existingReactions, optimisticReaction];
+      updatedReactions = [...existingReactions, targetReaction];
     }
 
     // Optimistic UI update
-    setMessages((prev) =>
-      prev.map((m) => (m.id === msg.id ? { ...m, reactions: updatedReactions } : m))
-    );
+    setMessages((prev) => {
+      const updated = prev.map((m) => (m.id === msg.id ? { ...m, reactions: updatedReactions } : m));
+      if (activePartner) dataCache.setMessages(activePartner.id, updated);
+      return updated;
+    });
+
+    // Realtime broadcast to partner
+    if (channelRef.current) {
+      channelRef.current.send({
+        type: 'broadcast',
+        event: 'toggle_reaction',
+        payload: {
+          messageId: msg.id,
+          reaction: targetReaction,
+          action: hasReacted ? 'remove' : 'add',
+        },
+      });
+    }
 
     if (isSupabaseConfigured) {
       try {
@@ -910,7 +1067,20 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
   const handleUnsendMessage = async (msg: Message) => {
     setActiveMenuMessageId(null);
     // Optimistically remove from state
-    setMessages((prev) => prev.filter((m) => m.id !== msg.id));
+    setMessages((prev) => {
+      const filtered = prev.filter((m) => m.id !== msg.id);
+      if (activePartner) dataCache.setMessages(activePartner.id, filtered);
+      return filtered;
+    });
+
+    // Realtime broadcast to partner
+    if (channelRef.current) {
+      channelRef.current.send({
+        type: 'broadcast',
+        event: 'delete_message',
+        payload: { messageId: msg.id },
+      });
+    }
 
     if (isSupabaseConfigured) {
       try {
@@ -931,7 +1101,11 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
     setActiveMenuMessageId(null);
 
     // Optimistically remove from current user's local state
-    setMessages((prev) => prev.filter((m) => m.id !== msg.id));
+    setMessages((prev) => {
+      const filtered = prev.filter((m) => m.id !== msg.id);
+      if (activePartner) dataCache.setMessages(activePartner.id, filtered);
+      return filtered;
+    });
 
     if (isSupabaseConfigured) {
       try {
@@ -993,7 +1167,11 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
         : null,
     };
 
-    setMessages((prev) => [...prev, optimisticMsg]);
+    setMessages((prev) => {
+      const updated = [...prev, optimisticMsg];
+      dataCache.setMessages(activePartner.id, updated);
+      return updated;
+    });
 
     // Update conversation list locally & move active conversation to top
     setConversations((prev) => {
@@ -1025,28 +1203,59 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
           payloadToInsert.reply_to_id = replyTarget.id;
         }
 
+        // Direct insert and fetch created record
         const { data, error } = await supabase
           .from('messages')
           .insert(payloadToInsert)
-          .select('*, sender_profile:sender_id(*), receiver_profile:receiver_id(*)')
+          .select('id, sender_id, receiver_id, content, reply_to_id, created_at, message_type, is_unsent, is_edited, deleted_for_user_ids')
           .single();
 
-        if (!error && data) {
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === tempId
-                ? {
-                    ...data,
-                    sender_profile: profile,
-                    receiver_profile: activePartner,
-                    reply_to_message: optimisticMsg.reply_to_message,
-                  }
-                : m
-            )
-          );
+        if (error) {
+          console.error('Supabase message insert error:', error);
         }
 
-        // Dispatch background Web Push notification to recipient
+        const serverMessage: Message = {
+          ...(data || optimisticMsg),
+          sender_profile: profile,
+          receiver_profile: activePartner,
+          reply_to_message: optimisticMsg.reply_to_message,
+          reactions: [],
+        };
+
+        // Update local state with real Supabase database ID
+        if (data?.id) {
+          setMessages((prev) => {
+            const updated = prev.map((m) => (m.id === tempId ? serverMessage : m));
+            dataCache.setMessages(activePartner.id, updated);
+            return updated;
+          });
+        }
+
+        // 1. Broadcast to active chat room for instant realtime delivery
+        if (channelRef.current) {
+          channelRef.current.send({
+            type: 'broadcast',
+            event: 'new_message',
+            payload: serverMessage,
+          });
+        }
+
+        // 2. Broadcast to recipient's global inbox channel to immediately update their conversation list
+        const recipientInboxChannel = supabase.channel(`global_inbox_${activePartner.id}`);
+        recipientInboxChannel.subscribe((status) => {
+          if (status === 'SUBSCRIBED') {
+            recipientInboxChannel.send({
+              type: 'broadcast',
+              event: 'inbox_message',
+              payload: serverMessage,
+            });
+            setTimeout(() => {
+              supabase.removeChannel(recipientInboxChannel);
+            }, 3000);
+          }
+        });
+
+        // 3. Dispatch background Web Push notification to recipient
         dispatchPushNotification({
           targetUserId: activePartner.id,
           type: 'message',
